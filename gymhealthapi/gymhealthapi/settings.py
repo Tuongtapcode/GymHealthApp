@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'gymhealth.apps.GymhealthConfig',
 ]
 
 MIDDLEWARE = [
@@ -48,6 +49,11 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+AUTH_USER_MODEL = 'gymhealth.User'
+
+import pymysql
+
+pymysql.install_as_MySQLdb()
 
 ROOT_URLCONF = 'gymhealthapi.urls'
 
@@ -73,12 +79,14 @@ WSGI_APPLICATION = 'gymhealthapi.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
-
+     'default': {
+         'ENGINE': 'django.db.backends.mysql',
+         'NAME': 'gymhealthdb',
+         'USER': 'root',
+         'PASSWORD': 'Admin@123',
+         'HOST': '' # mặc định localhost
+     }
+ }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
