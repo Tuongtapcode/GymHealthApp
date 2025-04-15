@@ -1,4 +1,10 @@
-from django.http import HttpResponse
+from gymhealth import serializers
+from rest_framework import viewsets, generics, permissions
 
-def index(request):
-    return HttpResponse("Hello, world. You're at the polls index.")
+from gymhealth.models import User
+
+
+class UserViewSet(viewsets.ModelViewSet, generics.ListAPIView):
+    queryset = User.objects.all()
+    serializer_class = serializers.UserSerializer
+

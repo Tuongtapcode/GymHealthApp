@@ -38,8 +38,19 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'gymhealth.apps.GymhealthConfig',
+    'rest_framework',
 ]
+import cloudinary
+import cloudinary.uploader
+from cloudinary.utils import cloudinary_url
 
+# Configuration
+cloudinary.config(
+    cloud_name = "duqln52pu",
+    api_key = "924291448136996",
+    api_secret = "JdsaVdMKR25NG7w-VRIBB7H2WXk", # Click 'View API Keys' above to copy your API secret
+    secure=True
+)
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
