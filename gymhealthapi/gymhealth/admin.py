@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.utils.safestring import mark_safe
 
-from gymhealth.models import User, Packages
+from gymhealth.models import User, Packages, PackageType
 
 class MyUserAdmin(UserAdmin):
     # Các trường hiển thị trên trang danh sách
@@ -55,3 +55,4 @@ class MyUserAdmin(UserAdmin):
 # Đăng ký User model với Admin site
 admin.site.register(User, MyUserAdmin)
 admin.site.register(Packages)
+admin.site.register(PackageType)

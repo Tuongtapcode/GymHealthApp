@@ -61,6 +61,10 @@ class HealthInfo(models.Model):
     def __str__(self):
         return f"Thông tin sức khỏe của {self.user.username}"
 
+    @property
+    def bmi(self):
+        return round(self.weight / ((self.height / 100) ** 2), 1)
+
 
 class MemberProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='member_profile')
