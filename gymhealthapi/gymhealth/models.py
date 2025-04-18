@@ -106,7 +106,16 @@ class TrainerProfile(models.Model):
         return f"PT {self.user.username}"
 
 
-class PackageType(models.Model):
+class BaseModel(models.Model):
+    active = models.BooleanField(default=True)
+    created_date = models.DateTimeField(auto_now_add=True)
+    updated_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class PackageType(BaseModel):
     name = models.CharField(max_length=100, verbose_name="Tên loại gói")
     duration_months = models.PositiveIntegerField(default=1, verbose_name="Số tháng")
     description = models.TextField(blank=True, null=True, verbose_name="Mô tả")
@@ -115,7 +124,7 @@ class PackageType(models.Model):
         return f"{self.name} ({self.duration_months} tháng)"
 
 
-class Benefit(models.Model):
+class Benefit(BaseModel):
     name = models.CharField(max_length=100, verbose_name="Tên quyền lợi")
     description = models.TextField(blank=True, null=True, verbose_name="Mô tả chi tiết")
     icon = models.CharField(max_length=50, blank=True, null=True, verbose_name="Icon")
@@ -124,7 +133,7 @@ class Benefit(models.Model):
         return self.name
 
 
-class Packages(models.Model):
+class Packages(BaseModel):
     name = models.CharField(max_length=100)
     package_type = models.ForeignKey(PackageType, on_delete=models.CASCADE, related_name="packages",
                                      verbose_name="Loại gói")
@@ -556,7 +565,8 @@ class Gym(models.Model):
     def __str__(self):
         return self.name
 
-#member
+
+# member
 
 class MemberProxy(User):
     class Meta:
@@ -564,11 +574,13 @@ class MemberProxy(User):
         verbose_name = 'Hội viên'
         verbose_name_plural = 'Hội viên'
 
+
 class TrainerProxy(User):
     class Meta:
         proxy = True
         verbose_name = 'Huấn luyện viên'
         verbose_name_plural = 'Huấn luyện viên'
+
 
 class ManagerProxy(User):
     class Meta:
