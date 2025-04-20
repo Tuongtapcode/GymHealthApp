@@ -252,7 +252,9 @@ class SubscriptionPackage(models.Model):
 
         super().save(*args, **kwargs)
 
-
+#
+#Lịch tập
+#
 class WorkoutSession(models.Model):
     SESSION_STATUS = (
         ('pending', 'Chờ duyệt'),
@@ -260,6 +262,7 @@ class WorkoutSession(models.Model):
         ('completed', 'Đã hoàn thành'),
         ('cancelled', 'Đã hủy'),
         ('rescheduled', 'Đã đổi lịch'),
+
     )
 
     SESSION_TYPE = (
@@ -299,6 +302,14 @@ class WorkoutSession(models.Model):
                 self.subscription.save()
         super().save(*args, **kwargs)
 
+    def clean(self):
+        conflicting_sessions = WorkoutSession.objects.filter(
+            models.Q(member=self.member) | models.Q(trainer=self.trainer),
+            session_date=self.session_date,
+            start_time__lt=self.end_time,
+            end_time__gt=self.start_time,
+            status__in=['pending', 'confirmed']
+        ).exclude(id=self.id)
 
 class TrainingProgress(models.Model):
     health_info = models.ForeignKey(HealthInfo, on_delete=models.CASCADE, related_name='progress_records')
@@ -567,20 +578,17 @@ class Gym(models.Model):
 
 
 # member
-
 class MemberProxy(User):
     class Meta:
         proxy = True
         verbose_name = 'Hội viên'
         verbose_name_plural = 'Hội viên'
 
-
 class TrainerProxy(User):
     class Meta:
         proxy = True
         verbose_name = 'Huấn luyện viên'
         verbose_name_plural = 'Huấn luyện viên'
-
 
 class ManagerProxy(User):
     class Meta:

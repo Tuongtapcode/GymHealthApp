@@ -1,13 +1,16 @@
+from datetime import date, timedelta
+
 from rest_framework.exceptions import PermissionDenied, NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from gymhealth import serializers
 from rest_framework import viewsets, generics, permissions, status, request
-
-from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType
+from gymhealth.perms import *
+from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, WorkoutSession, MemberProfile, \
+    TrainerProfile, Promotion, Notification
 from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSerializer, BenefitSerializer, \
-    PackageTypeSerializer, PackageSerializer, PackageDetailSerializer
+    PackageTypeSerializer, PackageSerializer, PackageDetailSerializer, TrainerListSerializer, SubscriptionPackage
 
 
 class IsOwner(permissions.BasePermission):
@@ -227,3 +230,350 @@ class PackageViewSet(viewsets.ModelViewSet):
         benefits = package.benefits.filter(active=True)
         serializer = BenefitSerializer(benefits, many=True)
         return Response(serializer.data)
+
+
+class TrainerListView(generics.ListAPIView):
+    """API để lấy danh sách PT với thông tin cơ bản và lịch làm việc"""
+    serializer_class = TrainerListSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ['username', 'first_name', 'last_name', 'trainer_profile__specialization']
+    ordering_fields = ['trainer_profile__experience_years', 'trainer_profile__hourly_rate']
+
+    def get_queryset(self):
+        # Lấy tất cả user có role là TRAINER
+        queryset = User.objects.filter(role='TRAINER', is_active=True)
+
+        # Lọc PT theo chuyên môn nếu có
+        specialization = self.request.query_params.get('specialization')
+        if specialization:
+            queryset = queryset.filter(trainer_profile__specialization__icontains=specialization)
+
+        # Lọc PT theo kinh nghiệm nếu có
+        min_experience = self.request.query_params.get('min_experience')
+        if min_experience and min_experience.isdigit():
+            queryset = queryset.filter(trainer_profile__experience_years__gte=int(min_experience))
+
+        # Lọc PT theo mức giá nếu có
+        max_price = self.request.query_params.get('max_price')
+        if max_price and max_price.replace('.', '', 1).isdigit():
+            queryset = queryset.filter(trainer_profile__hourly_rate__lte=float(max_price))
+
+        # Lọc PT theo ngày có lịch trống nếu có
+        available_date = self.request.query_params.get('available_date')
+        if available_date:
+            try:
+                # Chuyển đổi chuỗi ngày thành đối tượng date
+                available_date = date.fromisoformat(available_date)
+
+                # Lấy danh sách ID của các PT đã có lịch cả ngày (không còn slot trống)
+                # Giả sử mỗi ngày PT có thể làm từ 8:00 đến 20:00
+                fully_booked_trainers = WorkoutSession.objects.filter(
+                    trainer__isnull=False,
+                    session_date=available_date,
+                    status__in=['confirmed', 'pending'],
+                ).values_list('trainer__id', flat=True).distinct()
+
+                # Loại bỏ các PT đã kín lịch
+                queryset = queryset.exclude(id__in=fully_booked_trainers)
+            except ValueError:
+                # Xử lý khi định dạng ngày không hợp lệ
+                pass
+
+        return queryset.prefetch_related('trainer_profile')
+
+
+class TrainerDetailView(generics.RetrieveAPIView):
+    """API để lấy thông tin chi tiết của một PT cụ thể"""
+    serializer_class = serializers.TrainerDetailSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        trainer_id = self.kwargs.get('trainer_id')
+        trainer = User.objects.filter(id=trainer_id, role='TRAINER', is_active=True).first()
+
+        if trainer is None:
+            return Response({'detail': 'Trainer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return trainer
+
+class TrainerUpcomingSessionsView(generics.ListAPIView):
+    """API để lấy danh sách các buổi tập sắp tới của một PT cụ thể"""
+    serializer_class = serializers.WorkoutSessionScheduleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        trainer_id = self.kwargs.get('trainer_id')
+        # Kiểm tra xem trainer có tồn tại không
+        trainer = User.objects.filter(id=trainer_id, role='TRAINER', is_active=True).first()
+
+        if trainer is None:
+            return Response({'detail': 'Trainer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Lấy các buổi tập trong 7 ngày tới hoặc số ngày được chỉ định
+        days = self.request.query_params.get('days', 7)
+        try:
+            days = int(days)
+            if days < 1:
+                days = 7
+            elif days > 30:  # Giới hạn tối đa 30 ngày
+                days = 30
+        except (ValueError, TypeError):
+            days = 7
+
+        today = date.today()
+        end_date = today + timedelta(days=days)
+
+        # Lọc theo ngày cụ thể nếu có
+        specific_date = self.request.query_params.get('date')
+        if specific_date:
+            try:
+                specific_date = date.fromisoformat(specific_date)
+                sessions = WorkoutSession.objects.filter(
+                    trainer=trainer,
+                    session_date=specific_date,
+                    status__in=['confirmed', 'pending']
+                ).order_by('start_time')
+                return sessions
+            except ValueError:
+                pass
+
+        # Mặc định lấy lịch trong khoảng ngày
+        return WorkoutSession.objects.filter(
+            trainer=trainer,
+            session_date__gte=today,
+            session_date__lte=end_date,
+            status__in=['confirmed', 'pending']
+        ).order_by('session_date', 'start_time')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+
+        # Nhóm buổi tập theo ngày để trả về cấu trúc dễ hiểu hơn
+        sessions_by_date = {}
+        for session in serializer.data:
+            session_date = session['session_date']
+            if session_date not in sessions_by_date:
+                sessions_by_date[session_date] = []
+            sessions_by_date[session_date].append(session)
+
+        return Response({
+            'trainer_id': self.kwargs.get('trainer_id'),
+            'sessions_by_date': sessions_by_date
+        })
+
+
+class WorkoutSessionCreateView(generics.CreateAPIView):
+    """API để tạo buổi tập mới"""
+    serializer_class = serializers.WorkoutSessionCreateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        """Kiểm tra quyền và thực hiện tạo buổi tập"""
+        # Kiểm tra người dùng phải là hội viên
+        if not self.request.user.is_member:
+            raise PermissionDenied("Chỉ hội viên mới có thể đặt lịch tập.")
+
+        # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
+        try:
+            member_profile = self.request.user.member_profile
+            if not member_profile.is_membership_valid:
+                raise PermissionDenied("Tư cách hội viên của bạn đã hết hạn hoặc không hợp lệ.")
+        except MemberProfile.DoesNotExist:
+            raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
+
+        serializer.save()
+
+
+class SubscriptionPackageViewSet(viewsets.ModelViewSet):
+    serializer_class = serializers.SubscriptionPackageSerializer
+    search_fields = ['member__username', 'package__name', 'status']
+    ordering_fields = ['created_at', 'start_date', 'end_date']
+    filterset_fields = ['status', 'member', 'package']
+
+    def get_permissions(self):
+        """
+        - GET list: Manager mới xem được danh sách tất cả đăng ký
+        - GET detail: Chủ gói hoặc Manager mới xem được chi tiết
+        - POST/PUT/PATCH/DELETE: Manager mới thực hiện được
+        """
+        if self.action == 'list':
+            permission_classes = [IsManager]
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            permission_classes = [IsManager]
+        elif self.action in ['retrieve', 'my_subscriptions', 'active_subscription']:
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            permission_classes = [IsSubscriptionOwnerOrManager]
+        return [permission() for permission in permission_classes]
+
+    def get_queryset(self):
+        if self.request.user.is_manager:
+            # Manager xem được tất cả đăng ký
+            return SubscriptionPackage.objects.all()
+        # Hội viên chỉ xem được đăng ký của mình
+        return SubscriptionPackage.objects.filter(member=self.request.user)
+
+    def get_serializer_class(self):
+        if self.action in ['retrieve', 'my_subscriptions', 'active_subscription']:
+            return serializers.SubscriptionPackageDetailSerializer
+        return serializers.SubscriptionPackageSerializer
+
+    def get_object(self):
+        obj = super().get_object()
+        # Kiểm tra quyền truy cập
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    @action(detail=False, methods=['get'], url_path='my', url_name='my-subscriptions')
+    def my_subscriptions(self, request):
+        """Lấy danh sách gói đăng ký của người dùng hiện tại"""
+        if not request.user.is_member:
+            return Response({"error": "Chỉ hội viên mới có thể xem gói đăng ký"},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        subscriptions = SubscriptionPackage.objects.filter(member=request.user).order_by('-created_at')
+
+        # Lọc theo trạng thái nếu có
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            subscriptions = subscriptions.filter(status=status_filter)
+
+        page = self.paginate_queryset(subscriptions)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(subscriptions, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='active', url_name='active-subscription')
+    def active_subscription(self, request):
+        """Lấy gói đăng ký đang hoạt động của người dùng hiện tại"""
+        if not request.user.is_member:
+            return Response({"error": "Chỉ hội viên mới có thể xem gói đăng ký"},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        subscription = SubscriptionPackage.objects.filter(
+            member=request.user,
+            status='active',
+            start_date__lte=date.today(),
+            end_date__gte=date.today()
+        ).first()
+
+        if not subscription:
+            return Response({"error": "Không tìm thấy gói đăng ký đang hoạt động"},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        # Kiểm tra thành viên
+        member = serializer.validated_data.get('member')
+        if not member:
+            member = self.request.user
+
+        # Nếu không phải manager và không phải chính mình
+        if not self.request.user.is_manager and member != self.request.user:
+            raise PermissionDenied("Bạn không có quyền đăng ký cho người khác")
+
+        # Tạo đăng ký
+        serializer.save()
+
+    @action(detail=False, methods=['post'], url_path='register', permission_classes=[permissions.IsAuthenticated])
+    def register_package(self, request):
+        """API cho người dùng đăng ký gói tập"""
+        if not request.user.is_member:
+            return Response({"error": "Chỉ hội viên mới có thể đăng ký gói tập"},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Thêm thông tin member vào data
+        data = request.data.copy()
+        data['member'] = request.user.id
+
+        # Kiểm tra gói tập
+        package_id = data.get('package')
+        if not package_id:
+            return Response({"error": "Vui lòng chọn gói tập"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            package = Packages.objects.get(id=package_id, active=True)
+        except Packages.DoesNotExist:
+            return Response({"error": "Gói tập không tồn tại hoặc không còn hiệu lực"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Nếu không có ngày bắt đầu, mặc định là hôm nay
+        if not data.get('start_date'):
+            data['start_date'] = date.today().isoformat()
+
+        # Tạo và xác thực serializer
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        # Lưu đăng ký gói
+        subscription = serializer.save()
+
+        return Response(
+            {"message": f"Đăng ký gói tập {package.name} thành công",
+             "subscription": serializer.data},
+            status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=['post'], url_path='cancel', permission_classes=[IsSubscriptionOwnerOrManager])
+    def cancel_subscription(self, request, pk=None):
+        """Hủy gói đăng ký"""
+        subscription = self.get_object()
+
+        if subscription.status != 'active':
+            return Response({"error": "Chỉ có thể hủy gói đăng ký đang hoạt động"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Cập nhật trạng thái
+        subscription.status = 'cancelled'
+        subscription.save()
+
+        # Thông báo cho hội viên
+        Notification.objects.create(
+            user=subscription.member,
+            title="Gói tập đã bị hủy",
+            message=f"Gói tập {subscription.package.name} của bạn đã bị hủy.",
+            notification_type="system",
+            related_object_id=subscription.id
+        )
+
+        return Response({"message": "Đã hủy gói đăng ký thành công"})
+
+    @action(detail=True, methods=['post'], url_path='verify-payment', permission_classes=[IsManager])
+    def verify_payment(self, request, pk=None):
+        """Xác nhận thanh toán từ Manager"""
+        subscription = self.get_object()
+
+        if subscription.status != 'pending':
+            return Response({"error": "Chỉ có thể xác nhận thanh toán cho gói đăng ký đang chờ xử lý"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Cập nhật trạng thái
+        subscription.status = 'active'
+        subscription.save()
+
+        # Cập nhật hồ sơ thành viên
+        try:
+            member_profile = subscription.member.member_profile
+            member_profile.membership_end_date = subscription.end_date
+            member_profile.is_active = True
+            member_profile.save()
+        except MemberProfile.DoesNotExist:
+            pass
+
+        # Thông báo cho hội viên
+        Notification.objects.create(
+            user=subscription.member,
+            title="Thanh toán đã được xác nhận",
+            message=f"Gói tập {subscription.package.name} của bạn đã được kích hoạt và có thể sử dụng.",
+            notification_type="payment_confirmation",
+            related_object_id=subscription.id
+        )
+
+        return Response({"message": "Đã xác nhận thanh toán và kích hoạt gói thành công"})
