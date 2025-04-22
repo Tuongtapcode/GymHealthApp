@@ -1,0 +1,57 @@
+{% extends 'admin/base_site.html' %}
+
+{% block content %}
+<h1>THỐNG KÊ GÓI TẬP</h1>
+
+<ul>
+    {% for p in stats.package_stats %}
+    <li>{{ p.id }} - {{ p.name }}: {{ p.total_subscriptions }} lượt đăng ký</li>
+    {% endfor %}
+</ul>
+
+<div style="width: 60%; margin-top: 30px;">
+  <canvas id="myChart"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    let data = [];
+    let labels = [];
+
+    {% for p in stats.package_stats %}
+        data.push({{ p.total_subscriptions }});
+        labels.push('{{ p.name|escapejs }}');
+    {% endfor %}
+
+window.onload = function() {
+  const ctx = document.getElementById('myChart').getContext('2d');
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Số lượt đăng ký',
+        data: data,
+        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+        borderColor: 'rgba(54, 162, 235, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+              stepSize: 1  // mỗi bước là 1
+          }
+        }
+      }
+    }
+  });
+}
+</script>
+
+{% endblock %}

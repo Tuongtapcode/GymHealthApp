@@ -47,15 +47,15 @@ class HealthInfo(models.Model):
     height = models.FloatField(help_text='Chiều cao (cm)')
     weight = models.FloatField(help_text='Cân nặng (kg)')
     training_goal = models.CharField(max_length=20, choices=GOAL_CHOICES)
-    health_conditions = RichTextField()
+    health_conditions = RichTextField(help_text='Các vấn đề sức khỏe đặc biệt')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    notes = models.TextField(blank=True, null=True, help_text="Ghi chú về tình trạng sức khỏe")
+    notes = RichTextField(blank=True, null=True, help_text="Ghi chú về tình trạng sức khỏe")
     # Thông tin sức khỏe bổ sung (có thể mở rộng thêm)
     body_fat_percentage = models.FloatField(blank=True, null=True,
                                             validators=[MinValueValidator(3), MaxValueValidator(70)])
     blood_pressure = models.CharField(max_length=20, blank=True, null=True, help_text="Định dạng: 120/80")
-    medical_conditions = models.TextField(blank=True, null=True, help_text="Các vấn đề sức khỏe cần lưu ý")
+    medical_conditions = RichTextField(blank=True, null=True, help_text="Các vấn đề sức khỏe cần lưu ý")
 
     def __str__(self):
         return f"Thông tin sức khỏe của {self.user.username}"
@@ -91,7 +91,7 @@ class MemberProfile(models.Model):
 
 class TrainerProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='trainer_profile')
-    bio = models.TextField(blank=True, null=True)
+    bio = RichTextField(blank=True, null=True)
     specialization = models.CharField(max_length=255, blank=True, null=True, help_text="Chuyên môn huấn luyện")
     certification = models.CharField(max_length=255, blank=True, null=True, help_text="Chứng chỉ huấn luyện")
     experience_years = models.PositiveIntegerField(default=0)
@@ -117,7 +117,7 @@ class BaseModel(models.Model):
 class PackageType(BaseModel):
     name = models.CharField(max_length=100, verbose_name="Tên loại gói")
     duration_months = models.PositiveIntegerField(default=1, verbose_name="Số tháng")
-    description = models.TextField(blank=True, null=True, verbose_name="Mô tả")
+    description = RichTextField(blank=True, null=True, verbose_name="Mô tả")
 
     def __str__(self):
         return f"{self.name} ({self.duration_months} tháng)"
@@ -125,7 +125,7 @@ class PackageType(BaseModel):
 
 class Benefit(BaseModel):
     name = models.CharField(max_length=100, verbose_name="Tên quyền lợi")
-    description = models.TextField(blank=True, null=True, verbose_name="Mô tả chi tiết")
+    description = RichTextField(blank=True, null=True, verbose_name="Mô tả chi tiết")
     icon = models.CharField(max_length=50, blank=True, null=True, verbose_name="Icon")
 
     def __str__(self):
@@ -136,7 +136,7 @@ class Packages(BaseModel):
     name = models.CharField(max_length=100)
     package_type = models.ForeignKey(PackageType, on_delete=models.CASCADE, related_name="packages",
                                      verbose_name="Loại gói")
-    description = models.TextField(verbose_name="Mô tả gói tập")
+    description = RichTextField(verbose_name="Mô tả gói tập")
     price = models.DecimalField(max_digits=10, decimal_places=2,
                                 validators=[MinValueValidator(Decimal('0.00'))],
                                 verbose_name="Giá gói tập")
@@ -278,8 +278,8 @@ class WorkoutSession(models.Model):
     end_time = models.TimeField()
     session_type = models.CharField(max_length=20, choices=SESSION_TYPE)
     status = models.CharField(max_length=20, choices=SESSION_STATUS, default='pending')
-    notes = models.TextField(blank=True, null=True)
-    trainer_notes = models.TextField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
+    trainer_notes = RichTextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -321,7 +321,7 @@ class TrainingProgress(models.Model):
     hips = models.FloatField(blank=True, null=True, help_text='Số đo vòng hông (cm)')
     thighs = models.FloatField(blank=True, null=True, help_text='Số đo đùi (cm)')
     arms = models.FloatField(blank=True, null=True, help_text='Số đo cánh tay (cm)')
-    notes = models.TextField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_progress_records')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -338,7 +338,7 @@ class TrainingProgress(models.Model):
 # Mô hình theo dõi các bài tập và thành tích
 class Exercise(models.Model):
     name = models.CharField(max_length=100)
-    description = models.TextField(blank=True, null=True)
+    description = RichTextField(blank=True, null=True)
     target_muscles = models.CharField(max_length=255, blank=True, null=True)
     equipment_needed = models.CharField(max_length=255, blank=True, null=True)
     difficulty_level = models.IntegerField(choices=[(1, 'Dễ'), (2, 'Trung bình'), (3, 'Khó')], default=1)
@@ -363,7 +363,7 @@ class Notification(models.Model):
     )
     user = models.ForeignKey('User', on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
-    message = models.TextField()
+    message = RichTextField()
     notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES)
     related_object_id = models.IntegerField(blank=True, null=True)  # ID của đối tượng liên quan
     is_read = models.BooleanField(default=False)
@@ -383,7 +383,7 @@ class Notification(models.Model):
 # Mô hình Ưu đãi/Khuyến mãi
 class Promotion(models.Model):
     title = models.CharField(max_length=255)
-    description = models.TextField()
+    description = RichTextField()
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     valid_from = models.DateTimeField()
@@ -439,7 +439,7 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=255, blank=True, null=True)
     payment_date = models.DateTimeField(auto_now_add=True)
     confirmed_date = models.DateTimeField(blank=True, null=True)
-    notes = models.TextField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
 
     # Thông tin bổ sung cho từng phương thức thanh toán
     bank_name = models.CharField(max_length=100, blank=True, null=True)
@@ -466,7 +466,7 @@ class PaymentReceipt(models.Model):
     verified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                     related_name='verified_receipts')
     verification_date = models.DateTimeField(blank=True, null=True)
-    notes = models.TextField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
 
     class Meta:
         verbose_name = "Biên lai thanh toán"
@@ -490,7 +490,7 @@ class Rating(models.Model):
     # Object ID sẽ là ID của đối tượng được đánh giá (PT, cơ sở, dịch vụ...)
     object_id = models.IntegerField(null=True, blank=True)
     score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    comment = models.TextField(blank=True, null=True)
+    comment = RichTextField(blank=True, null=True)
     anonymous = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -523,7 +523,7 @@ class TrainerRating(models.Model):
                                             verbose_name="Đúng giờ")
     overall_score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)],
                                         verbose_name="Đánh giá tổng thể")
-    comment = models.TextField(blank=True, null=True)
+    comment = RichTextField(blank=True, null=True)
     anonymous = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -551,7 +551,7 @@ class FeedbackResponse(models.Model):
     trainer_rating = models.ForeignKey(TrainerRating, on_delete=models.CASCADE, related_name='responses', null=True,
                                        blank=True)
     responder = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feedback_responses')
-    response_text = models.TextField()
+    response_text = RichTextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -568,9 +568,9 @@ class FeedbackResponse(models.Model):
 
 class Gym(models.Model):
     name = models.CharField(max_length=100)
-    address = models.TextField()
+    address = models.CharField(max_length=200)
     phone = models.CharField(max_length=20)
-    description = models.TextField(blank=True)
+    description = RichTextField(blank=True)
 
     def __str__(self):
         return self.name
