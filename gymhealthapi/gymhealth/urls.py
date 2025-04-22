@@ -19,5 +19,10 @@ urlpatterns = [
     path('trainers/<int:trainer_id>/', views.TrainerDetailView.as_view(), name='trainer-detail'),
     path('trainers/<int:trainer_id>/upcoming_sessions/', views.TrainerUpcomingSessionsView.as_view(),
          name='trainer-upcoming-sessions'),
-    path('workout-sessions/', views.WorkoutSessionCreateView.as_view(), name='workout-session-create'),
+    path('api/member/workout-sessions/', views.WorkoutSessionCreateView.as_view(), name='workout-session-create'),
+    path('api/trainer/sessions/', views.TrainerWorkoutSessionListView.as_view(), name='trainer-sessions'),
+    path('api/trainer/sessions/<int:pk>/', views.TrainerWorkoutSessionUpdateView.as_view(),
+         name='trainer-session-update'),
+    path('api/trainer/sessions/<int:session_id>/reschedule/', views.RescheduleSessionView.as_view(),
+         name='trainer-reschedule-session'),
 ]

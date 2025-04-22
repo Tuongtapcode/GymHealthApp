@@ -29,7 +29,7 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 # Application definition
-CKEDITOR_UPLOAD_PATH = "images/lessons/"
+CKEDITOR_UPLOAD_PATH = "images/"
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',

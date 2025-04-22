@@ -3,8 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 from cloudinary.models import CloudinaryField
-from django.core.exceptions import ValidationError
-
+from ckeditor.fields import RichTextField
 
 class User(AbstractUser):
     ROLE = (
@@ -16,7 +15,7 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=ROLE, default='MEMBER')
     phone_number = models.CharField(max_length=15)
     date_of_birth = models.DateField(null=True, blank=True)
-    address = models.TextField(blank=True)
+    address = models.CharField(max_length=200, null=True, blank=True)
     avatar = CloudinaryField()
 
     @property
@@ -48,7 +47,7 @@ class HealthInfo(models.Model):
     height = models.FloatField(help_text='Chiều cao (cm)')
     weight = models.FloatField(help_text='Cân nặng (kg)')
     training_goal = models.CharField(max_length=20, choices=GOAL_CHOICES)
-    health_conditions = models.TextField(blank=True, help_text='Các vấn đề sức khỏe đặc biệt')
+    health_conditions = RichTextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True, null=True, help_text="Ghi chú về tình trạng sức khỏe")

@@ -1,8 +1,9 @@
 from django.contrib.auth.password_validation import validate_password
 from django.db.models import FloatField
-from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanField, SerializerMethodField, DateField
+from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanField, SerializerMethodField, DateField, \
+    IntegerField, TimeField
 from rest_framework.relations import PrimaryKeyRelatedField
-from rest_framework.serializers import ModelSerializer, CharField, ValidationError
+from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from datetime import date, timedelta
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
     WorkoutSession, SubscriptionPackage, Promotion, Notification
@@ -469,3 +470,58 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
         # Tạo buổi tập mới
         workout_session = WorkoutSession.objects.create(**validated_data)
         return workout_session
+
+
+class WorkoutSessionListSerializer(ModelSerializer):
+    member_name = SerializerMethodField()
+
+    class Meta:
+        model = WorkoutSession
+        fields = ['id', 'member_name', 'session_date', 'start_time', 'end_time',
+                  'session_type', 'status', 'notes', 'created_at']
+
+    def get_member_name(self, obj):
+        return f"{obj.member.first_name} {obj.member.last_name}"
+
+
+class WorkoutSessionUpdateSerializer(ModelSerializer):
+    class Meta:
+        model = WorkoutSession
+        fields = ['status', 'trainer_notes']
+
+    def validate_status(self, value):
+        # Chỉ chấp nhận một số trạng thái nhất định cho PT
+        valid_statuses = ['confirmed', 'cancelled', 'rescheduled']
+        if value not in valid_statuses:
+            raise ValidationError(f"Trạng thái không hợp lệ. Chọn một trong: {', '.join(valid_statuses)}")
+        return value
+
+
+class RescheduleSessionSerializer(Serializer):
+    # Bỏ session_id vì sẽ lấy từ URL
+    new_date = DateField()
+    new_start_time = TimeField()
+    new_end_time = TimeField()
+    reason = CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        # Kiểm tra thời gian hợp lệ
+        if data['new_start_time'] >= data['new_end_time']:
+            raise ValidationError("Thời gian kết thúc phải sau thời gian bắt đầu.")
+
+        # Kiểm tra xung đột lịch - lấy session từ context thay vì dùng session_id
+        trainer = self.context['request'].user
+        session = self.context['session']
+
+        conflicting_sessions = WorkoutSession.objects.filter(
+            trainer=trainer,
+            session_date=data['new_date'],
+            start_time__lt=data['new_end_time'],
+            end_time__gt=data['new_start_time'],
+            status__in=['pending', 'confirmed']
+        ).exclude(id=session.id)
+
+        if conflicting_sessions.exists():
+            raise ValidationError("Thời gian này đã có lịch tập khác. Vui lòng chọn thời gian khác.")
+
+        return data
