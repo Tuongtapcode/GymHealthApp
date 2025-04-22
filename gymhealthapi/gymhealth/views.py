@@ -469,8 +469,12 @@ class RescheduleSessionView(generics.GenericAPIView):
         try:
             return WorkoutSession.objects.get(id=session_id, trainer=self.request.user)
         except WorkoutSession.DoesNotExist:
-            raise Http404("Buổi tập không tồn tại hoặc bạn không phải PT của buổi tập này.")
+            return Response(
+                {"detail": "Buổi tập không tồn tại hoặc bạn không phải PT của buổi tập này."},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
+    
     def post(self, request, session_id, *args, **kwargs):
         if not request.user.is_trainer:
             return Response({"detail": "Chỉ huấn luyện viên mới có thể đề xuất lịch tập mới."},
