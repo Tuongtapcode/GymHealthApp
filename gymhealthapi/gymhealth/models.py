@@ -1,9 +1,38 @@
+from django.contrib.auth.base_user import BaseUserManager
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 from cloudinary.models import CloudinaryField
 from ckeditor.fields import RichTextField
+
+
+class UserManager(BaseUserManager):
+    use_in_migrations = True
+
+    def create_user(self, username, email=None, password=None, **extra_fields):
+        if not username:
+            raise ValueError('The Username must be set')
+        email = self.normalize_email(email)
+        user = self.model(username=username, email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+
+        # Gán role là MANAGER cho superuser
+        extra_fields.setdefault('role', 'MANAGER')
+
+        return self.create_user(username, email, password, **extra_fields)
+
 
 class User(AbstractUser):
     ROLE = (
@@ -16,7 +45,9 @@ class User(AbstractUser):
     phone_number = models.CharField(max_length=15)
     date_of_birth = models.DateField(null=True, blank=True)
     address = models.CharField(max_length=200, null=True, blank=True)
+    gender = models.CharField(max_length=10, null=True, blank=True)
     avatar = CloudinaryField()
+    objects = UserManager()  # <== thêm dòng này
 
     @property
     def is_manager(self):
@@ -251,8 +282,9 @@ class SubscriptionPackage(models.Model):
 
         super().save(*args, **kwargs)
 
+
 #
-#Lịch tập
+# Lịch tập
 #
 class WorkoutSession(models.Model):
     SESSION_STATUS = (
@@ -309,6 +341,7 @@ class WorkoutSession(models.Model):
             end_time__gt=self.start_time,
             status__in=['pending', 'confirmed']
         ).exclude(id=self.id)
+
 
 class TrainingProgress(models.Model):
     health_info = models.ForeignKey(HealthInfo, on_delete=models.CASCADE, related_name='progress_records')
@@ -583,11 +616,13 @@ class MemberProxy(User):
         verbose_name = 'Hội viên'
         verbose_name_plural = 'Hội viên'
 
+
 class TrainerProxy(User):
     class Meta:
         proxy = True
         verbose_name = 'Huấn luyện viên'
         verbose_name_plural = 'Huấn luyện viên'
+
 
 class ManagerProxy(User):
     class Meta:

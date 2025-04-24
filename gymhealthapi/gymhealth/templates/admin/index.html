@@ -1,0 +1,40 @@
+{% extends "admin/index.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .gymhealth-button {
+        display: inline-block;
+        background: red;
+        color: #fff !important;
+        padding: 10px 15px;
+        border-radius: 4px;
+        font-weight: bold;
+        text-decoration: none;
+        margin-top: 5px;
+        transition: background 0.3s;
+    }
+    
+    .gymhealth-button:hover {
+        background: green;
+        text-decoration: none;
+    }
+</style>
+{% endblock %}
+
+{% block sidebar %}
+{{ block.super }}
+<div class="module gymhealth-tools">
+    <h2>{% trans 'GymHealth Tools' %}</h2>
+    <ul class="actionlist" style="list-style-type: none; padding-left: 0;">
+        <li>
+            <a href="{% url 'admin:gymhealth-stats' %}" class="gymhealth-button">
+                <i class="fas fa-chart-bar" style="margin-right: 8px;"></i>
+                {% trans 'Thống kê GymHealth' %}
+            </a>
+        </li>
+    </ul>
+</div>
+{% endblock %}
