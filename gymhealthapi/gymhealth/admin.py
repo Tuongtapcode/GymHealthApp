@@ -13,6 +13,7 @@ from gymhealth.models import (
     FeedbackResponse, Gym, MemberProxy, TrainerProxy, ManagerProxy
 )
 from django.db.models import Count, Sum, Avg
+from django.db.models.functions import ExtractHour
 
 
 class MembershipStatusFilter(SimpleListFilter):
@@ -40,7 +41,8 @@ class MembershipStatusFilter(SimpleListFilter):
             )
         return queryset
 
-#Hiển thị mỗi bản ghi dưới dạng khối (stacked) — mỗi trường nằm trên một dòng
+
+# Hiển thị mỗi bản ghi dưới dạng khối (stacked) — mỗi trường nằm trên một dòng
 class HealthInfoInline(admin.StackedInline):
     model = HealthInfo
     can_delete = False
@@ -64,7 +66,8 @@ class TrainerProfileInline(admin.StackedInline):
     fk_name = 'user'
     extra = 0
 
-#TabularInline được dùng để hiển thị và chỉnh sửa các model liên quan (related models) theo dạng bảng trong trang admin của model chính
+
+# TabularInline được dùng để hiển thị và chỉnh sửa các model liên quan (related models) theo dạng bảng trong trang admin của model chính
 class TrainingProgressInline(admin.TabularInline):
     model = TrainingProgress
     extra = 0
@@ -292,14 +295,6 @@ class MyAdminSite(admin.AdminSite):
             path('gymhealth-stats/', self.admin_view(self.gymhealth_stats), name="gymhealth-stats"),
         ]
         return my_urls + urls
-    # def get_urls(self):
-    #     urls = super().get_urls()
-    #     my_urls = [
-    #         path('gymhealth-stats/', self.admin_view(self.gymhealth_stats)),
-    #         path('member-stats/', self.admin_view(self.member_stats)),
-    #         path('revenue-stats/', self.admin_view(self.revenue_stats)),
-    #     ]
-    #     return my_urls + urls
 
     def gymhealth_stats(self, request):
         package_stats = Packages.objects.annotate(
@@ -324,16 +319,101 @@ class MyAdminSite(admin.AdminSite):
             'pt_sessions': WorkoutSession.objects.filter(session_type='pt_session').count(),
             'self_training': WorkoutSession.objects.filter(session_type='self_training').count(),
         }
+        # Thống kê doanh thu theo tháng
+        from django.db.models.functions import TruncMonth
+        revenue_by_month = Payment.objects.filter(
+            status='completed'
+        ).annotate(
+            month=TruncMonth('payment_date')
+        ).values('month').annotate(
+            total=Sum('amount')
+        ).order_by('month')
+        # Tạo các khung giờ phổ biến trong phòng gym
+        time_slots = {
+            'early_morning': (5, 8),  # 5:00 - 8:59
+            'morning': (9, 11),  # 9:00 - 11:59
+            'noon': (12, 13),  # 12:00 - 13:59
+            'afternoon': (14, 16),  # 14:00 - 16:59
+            'evening': (17, 20),  # 17:00 - 20:59
+            'night': (21, 23)  # 21:00 - 23:59
+        }
+        # Truy vấn số lượng buổi tập theo giờ
+        hourly_usage = WorkoutSession.objects.filter(
+            status__in=['confirmed', 'completed']
+        ).annotate(
+            hour=ExtractHour('start_time')
+        ).values('hour').annotate(
+            count=Count('id')
+        ).order_by('hour')
+        # Chuyển đổi dữ liệu theo giờ thành dữ liệu theo khung giờ
+        time_slot_usage = {slot: 0 for slot in time_slots.keys()}
+        hourly_data = {item['hour']: item['count'] for item in hourly_usage}
+
+        for slot_name, (start_hour, end_hour) in time_slots.items():
+            for hour in range(start_hour, end_hour + 1):
+                time_slot_usage[slot_name] += hourly_data.get(hour, 0)
+
+            # Phân tích xu hướng sử dụng theo ngày trong tuần
+        from django.db.models.functions import ExtractWeekDay
+        weekday_usage = WorkoutSession.objects.filter(
+            status__in=['confirmed', 'completed']
+        ).annotate(
+            weekday=ExtractWeekDay('session_date')
+        ).values('weekday').annotate(
+            count=Count('id')
+        ).order_by('weekday')
+
+        # Chuyển đổi số ngày trong tuần (1=Sunday, 7=Saturday) sang tên ngày
+        weekday_names = {
+            1: 'Chủ nhật',
+            2: 'Thứ hai',
+            3: 'Thứ ba',
+            4: 'Thứ tư',
+            5: 'Thứ năm',
+            6: 'Thứ sáu',
+            7: 'Thứ bảy'
+        }
+
+        weekday_data = {weekday_names[item['weekday']]: item['count'] for item in weekday_usage}
+
+        # Tính tổng doanh thu
+        total_revenue = Payment.objects.filter(status='completed').aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+
+        # Doanh thu theo phương thức thanh toán
+        payment_method_stats = Payment.objects.filter(
+            status='completed'
+        ).values('payment_method').annotate(
+            count=Count('id'),
+            total=Sum('amount')
+        ).order_by('-total')
 
         stats = {
             'package_stats': package_stats,
             'user_stats': user_stats,
             'workout_stats': workout_stats,
+            'revenue_by_month': revenue_by_month,
+            'hourly_usage': hourly_usage,
+            'time_slot_usage': time_slot_usage,
+            'weekday_usage': weekday_data,
+            'total_revenue': total_revenue,
+            'payment_method_stats': payment_method_stats,
         }
+
         return TemplateResponse(request, 'admin/stats.html', {
             'title': 'Thống kê GymHealth',
             'stats': stats
         })
+
+    # def get_urls(self):
+    #     urls = super().get_urls()
+    #     my_urls = [
+    #         path('gymhealth-stats/', self.admin_view(self.gymhealth_stats)),
+    #         path('member-stats/', self.admin_view(self.member_stats)),
+    #         path('revenue-stats/', self.admin_view(self.revenue_stats)),
+    #     ]
+    #     return my_urls + urls
 
     def member_stats(self, request):
         # Biểu đồ tăng trưởng hội viên theo thời gian
