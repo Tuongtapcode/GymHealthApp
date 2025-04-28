@@ -217,10 +217,22 @@ class HealthInfoAdmin(admin.ModelAdmin):
 
 
 class TrainingProgressAdmin(admin.ModelAdmin):
-    list_display = ('health_info', 'date', 'weight', 'body_fat_percentage', 'created_by', 'created_at')
-    list_filter = ('date', 'created_by')
-    search_fields = ('health_info__user__username', 'notes')
-    date_hierarchy = 'date'
+    list_display = ('get_member_name', 'get_session_date', 'weight', 'body_fat_percentage', 'created_by', 'created_at')
+    list_filter = ('workout_session__session_date', 'created_by')
+    search_fields = ('workout_session__member__username', 'notes', 'health_info__user__username')
+    date_hierarchy = 'workout_session__session_date'
+
+    def get_member_name(self, obj):
+        return obj.health_info.user.username
+
+    get_member_name.short_description = 'Thành viên'
+    get_member_name.admin_order_field = 'health_info__user__username'
+
+    def get_session_date(self, obj):
+        return obj.workout_session.session_date
+
+    get_session_date.short_description = 'Ngày'
+    get_session_date.admin_order_field = 'workout_session__session_date'
 
 
 class PaymentAdmin(admin.ModelAdmin):

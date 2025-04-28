@@ -1,29 +1,27 @@
 from datetime import date, timedelta, datetime
-
-from rest_framework.exceptions import PermissionDenied, NotFound
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.decorators import action
-from gymhealth import serializers
-from rest_framework import viewsets, generics, permissions, status, request
-from gymhealth.perms import *
+from gymhealth import serializers, perms
+from rest_framework import viewsets, generics, permissions, status, request, parsers, permissions, filters, mixins
 from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, WorkoutSession, MemberProfile, \
-    TrainerProfile, Promotion, Notification
+    TrainerProfile, Promotion, Notification, TrainingProgress
+from gymhealth.perms import IsOwner, IsProfileOwnerOrManager
 from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSerializer, BenefitSerializer, \
     PackageTypeSerializer, PackageSerializer, PackageDetailSerializer, TrainerListSerializer, SubscriptionPackage
-
-
-class IsOwner(permissions.BasePermission):
-    def has_object_permission(self, request, view, obj):
-        return obj.user == request.user
+from django.db.models import Min, Max
 
 
 class UserViewSet(viewsets.ViewSet):
-    queryset = User.objects.filter(is_active=True).all()
+    queryset = User.objects.filter(is_active=True)
     serializer_class = serializers.UserSerializer
+    # Định nghĩa gửi form
+    parser_classes = [parsers.MultiPartParser]
 
     @action(methods=['get', 'patch'], url_path="current-user", detail=False,
             permission_classes=[permissions.IsAuthenticated])
+    # API cập nhật mật khẩu, lấy thông tin người dùng
     def get_current_user(self, request):
         if request.method.__eq__("PATCH"):
             u = request.user
@@ -42,16 +40,18 @@ class UserViewSet(viewsets.ViewSet):
 
 class UserRegisterView(generics.CreateAPIView):
     serializer_class = serializers.UserSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny]  # ALL
 
     def create(self, request, *args, **kwargs):
+        # Khởi tạo serializer với dữ liệu từ request (POST body)
         serializer = self.get_serializer(data=request.data)
+
+        # Kiểm tra dữ liệu có hợp lệ không
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        user = serializer.save()  # Lưu vào db
         message = "Đăng ký thành công."
         if user.role == 'MEMBER':
             message += " Thông tin sức khỏe của bạn đã được lưu lại."
-
         return Response({
             "user": serializer.data,
             "message": message,
@@ -61,7 +61,8 @@ class UserRegisterView(generics.CreateAPIView):
 
 class HealthInfoViewSet(viewsets.ViewSet):
     serializer_class = serializers.HealthInfoSerializer
-    permissions_classes = [permissions.IsAuthenticated, IsOwner]
+    # Quyền đã đăng nhập và chủ sở hữu mới được sử dụng API
+    permission_classes = [permissions.IsAuthenticated, perms.IsOwner]
 
     def get_object(self):
         """
@@ -115,7 +116,8 @@ class HealthInfoViewSet(viewsets.ViewSet):
 
 
 class UserProfileView(generics.GenericAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    # Quyền đã đăng nhập, và sở hữu
+    permission_classes = [permissions.IsAuthenticated, perms.IsOwner]
 
     def get_serializer_class(self):
         user = self.request.user
@@ -142,26 +144,26 @@ class UserProfileView(generics.GenericAPIView):
             raise PermissionDenied("Bạn không có quyền truy cập hồ sơ.")
 
     def get(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
+        p = self.get_object()
+        serializer = self.get_serializer(p)
         return Response(serializer.data)
 
-    def patch(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
+    def patch(self, request, *args, **kwargs):  # sử dụng partial=True cập nhật một phần
+        p = self.get_object()
+        serializer = self.get_serializer(p, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
 
     def put(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data)
+        p = self.get_object()
+        serializer = self.get_serializer(p, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
 
 
-class PackageTypeViewSet(viewsets.ModelViewSet):
+class PackageTypeViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = PackageType.objects.filter(active=True)
     serializer_class = PackageTypeSerializer
     search_fields = ['name', 'description']
@@ -173,11 +175,11 @@ class PackageTypeViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.AllowAny]
         else:
             # POST, PUT, PATCH, DELETE => Phải là user có quyền (IsAuthenticated)
-            permission_classes = [permissions.IsAuthenticated]
+            permission_classes = [permissions.IsAuthenticated, perms.IsManager]
         return [permission() for permission in permission_classes]
 
 
-class BenefitViewSet(viewsets.ModelViewSet):
+class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Benefit.objects.filter(active=True)
     serializer_class = BenefitSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -185,41 +187,41 @@ class BenefitViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name']
 
 
-class PackageViewSet(viewsets.ModelViewSet):
+class PackageViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Packages.objects.filter(active=True)
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     serializer_class = PackageSerializer
     search_fields = ['name', 'description']
     ordering_fields = ['price', 'package_type__duration_months', 'pt_sessions']
     filterset_fields = ['package_type', 'pt_sessions', 'price']
+    filter_backends = [DjangoFilterBackend]
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            # GET, HEAD, OPTIONS => Ai cũng được phép (AllowAny)
+            permission_classes = [permissions.AllowAny]
+        else:
+            # POST, PUT, PATCH, DELETE => Phải là user có quyền (IsAuthenticated)
+            permission_classes = [permissions.IsAuthenticated, perms.IsManager]
+        return [permission() for permission in permission_classes]
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return PackageDetailSerializer
         return PackageSerializer
 
-    @action(detail=False, methods=['get'])
-    def active(self, request):
-        """Danh sách các gói còn active"""
-        packages = self.queryset.filter(active=True)
-        serializer = self.get_serializer(packages, many=True)
+    def list(self, request, *args, **kwargs):
+        # Apply the default filtering, ordering, etc. by calling super().filter_queryset()
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], url_path="with_pt")
     def with_pt(self, request):
         """Danh sách gói có buổi PT"""
-        packages = self.queryset.filter(pt_sessions__gt=0)
-        serializer = self.get_serializer(packages, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'])
-    def by_type(self, request):
-        """Danh sách gói theo type_id"""
-        type_id = request.query_params.get('type_id')
-        if not type_id:
-            return Response({"error": "Missing type_id"}, status=400)
-
-        packages = self.queryset.filter(package_type_id=type_id)
+        # Apply filters first, then add the pt_sessions filter
+        queryset = self.filter_queryset(self.get_queryset())
+        packages = queryset.filter(pt_sessions__gt=0)
         serializer = self.get_serializer(packages, many=True)
         return Response(serializer.data)
 
@@ -305,10 +307,11 @@ class TrainerUpcomingSessionsView(generics.ListAPIView):
     def get_queryset(self):
         trainer_id = self.kwargs.get('trainer_id')
         # Kiểm tra xem trainer có tồn tại không
+
         trainer = User.objects.filter(id=trainer_id, role='TRAINER', is_active=True).first()
 
         if trainer is None:
-            return Response({'detail': 'Trainer not found'}, status=status.HTTP_404_NOT_FOUND)
+            raise NotFound(detail="Trainer not found")
 
         # Lấy các buổi tập trong 7 ngày tới hoặc số ngày được chỉ định
         days = self.request.query_params.get('days', 7)
@@ -364,193 +367,179 @@ class TrainerUpcomingSessionsView(generics.ListAPIView):
         })
 
 
-class WorkoutSessionCreateView(generics.CreateAPIView):
-    """API để tạo buổi tập mới"""
-    serializer_class = serializers.WorkoutSessionCreateSerializer
-    permission_classes = [permissions.IsAuthenticated]
+#
+# class WorkoutSessionCreateView(generics.CreateAPIView):
+#     """API để tạo buổi tập mới"""
+#     serializer_class = serializers.WorkoutSessionCreateSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+#
+#     def perform_create(self, serializer):
+#         """Kiểm tra quyền và thực hiện tạo buổi tập"""
+#         # Kiểm tra người dùng phải là hội viên
+#         if not self.request.user.is_member:
+#             raise PermissionDenied("Chỉ hội viên mới có thể đặt lịch tập.")
+#
+#         # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
+#         try:
+#             member_profile = self.request.user.member_profile
+#             if not member_profile.is_membership_valid:
+#                 raise PermissionDenied("Tư cách hội viên của bạn đã hết hạn hoặc không hợp lệ.")
+#         except MemberProfile.DoesNotExist:
+#             raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
+#
+#         serializer.save()
+#
+#
+# class TrainerWorkoutSessionListView(generics.ListAPIView):
+#     """API để PT xem danh sách lịch tập được yêu cầu"""
+#     serializer_class = serializers.WorkoutSessionListScheduleSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+#
+#     def get_queryset(self):
+#         """Lọc danh sách buổi tập theo PT hiện tại"""
+#         if not self.request.user.is_trainer:
+#             raise PermissionDenied("Chỉ huấn luyện viên mới có thể xem danh sách này.")
+#
+#         # Mặc định hiển thị các buổi tập đang chờ duyệt
+#         status_filter = self.request.query_params.get('status', 'pending')
+#
+#         queryset = WorkoutSession.objects.filter(
+#             trainer=self.request.user,
+#             session_type='pt_session'
+#         )
+#
+#         # Lọc theo trạng thái nếu có
+#         if status_filter != 'all':
+#             queryset = queryset.filter(status=status_filter)
+#
+#         return queryset.order_by('session_date', 'start_time')
+#
+#
+# class TrainerWorkoutSessionUpdateView(generics.UpdateAPIView):
+#     """API để PT cập nhật trạng thái buổi tập"""
+#     serializer_class = serializers.WorkoutSessionUpdateSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+#     queryset = WorkoutSession.objects.all()
+#
+#     def get_object(self):
+#         obj = super().get_object()
+#         if not self.request.user.is_trainer:
+#             raise PermissionDenied("Chỉ huấn luyện viên mới có thể cập nhật lịch tập.")
+#
+#         if obj.trainer != self.request.user:
+#             raise PermissionDenied("Bạn không có quyền cập nhật buổi tập này.")
+#
+#         if obj.session_type != 'pt_session':
+#             raise PermissionDenied("Bạn chỉ có thể cập nhật buổi tập PT.")
+#
+#         return obj
+#
+#     def perform_update(self, serializer):
+#         # Tự động gửi thông báo khi PT cập nhật trạng thái
+#         session = self.get_object()
+#         new_status = serializer.validated_data.get('status')
+#         notes = serializer.validated_data.get('trainer_notes', '')
+#
+#         serializer.save()
+#
+#         # Tạo thông báo cho hội viên
+#         if new_status == 'confirmed':
+#             message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã được PT xác nhận."
+#         elif new_status == 'cancelled':
+#             message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã bị hủy."
+#         elif new_status == 'rescheduled':
+#             message = f"PT đề xuất đổi lịch cho buổi tập vào ngày {session.session_date}."
+#
+#         if notes:
+#             message += f" Ghi chú: {notes}"
+#
+#         # Tạo thông báo cho hội viên
+#         Notification.objects.create(
+#             user=session.member,
+#             title=f"Cập nhật lịch tập - {dict(WorkoutSession.SESSION_STATUS)[new_status]}",
+#             message=message,
+#             notification_type='session_reminder',
+#             related_object_id=session.id
+#         )
+#
+#
+# class RescheduleSessionView(generics.GenericAPIView):
+#     """API để PT đề xuất thời gian mới cho buổi tập"""
+#     serializer_class = serializers.RescheduleSessionSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+#
+#     def get_session(self, session_id):
+#         """Lấy buổi tập từ ID và kiểm tra quyền"""
+#         try:
+#             return WorkoutSession.objects.get(id=session_id, trainer=self.request.user)
+#         except WorkoutSession.DoesNotExist:
+#             return Response(
+#                 {"detail": "Buổi tập không tồn tại hoặc bạn không phải PT của buổi tập này."},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+#
+#     def post(self, request, session_id, *args, **kwargs):
+#         if not request.user.is_trainer:
+#             return Response({"detail": "Chỉ huấn luyện viên mới có thể đề xuất lịch tập mới."},
+#                             status=status.HTTP_403_FORBIDDEN)
+#
+#         # Lấy buổi tập từ ID trong URL
+#         session = self.get_session(session_id)
+#
+#         # Truyền session vào context để serializer có thể sử dụng
+#         serializer = self.get_serializer(
+#             data=request.data,
+#             context={'request': request, 'session': session}
+#         )
+#         serializer.is_valid(raise_exception=True)
+#
+#         # Tạo bản ghi lịch sử về việc đổi lịch
+#         old_date = session.session_date
+#         old_start = session.start_time
+#
+#         # Cập nhật trạng thái và tạo ghi chú
+#         reason = serializer.validated_data.get('reason', '')
+#         note = f"Đề xuất đổi lịch từ {old_date} {old_start} sang {serializer.validated_data['new_date']} {serializer.validated_data['new_start_time']}. "
+#         if reason:
+#             note += f"Lý do: {reason}"
+#
+#         # Cập nhật session
+#         session.session_date = serializer.validated_data['new_date']
+#         session.start_time = serializer.validated_data['new_start_time']
+#         session.end_time = serializer.validated_data['new_end_time']
+#         session.status = 'rescheduled'
+#         session.trainer_notes = note
+#         session.save()
+#
+#         # Tạo thông báo cho hội viên
+#         Notification.objects.create(
+#             user=session.member,
+#             title="Đề xuất thay đổi lịch tập",
+#             message=f"PT {request.user.get_full_name()} đã đề xuất đổi lịch tập của bạn sang ngày {serializer.validated_data['new_date']} lúc {serializer.validated_data['new_start_time']}. {reason}",
+#             notification_type='session_reminder',
+#             related_object_id=session.id
+#         )
+#
+#         return Response({
+#             "detail": "Đã đề xuất lịch tập mới thành công.",
+#             "session": {
+#                 "id": session.id,
+#                 "member": session.member.get_full_name(),
+#                 "new_date": session.session_date,
+#                 "new_start_time": session.start_time,
+#                 "new_end_time": session.end_time,
+#                 "status": session.status
+#             }
+#         }, status=status.HTTP_200_OK)
+#
 
-    def perform_create(self, serializer):
-        """Kiểm tra quyền và thực hiện tạo buổi tập"""
-        # Kiểm tra người dùng phải là hội viên
-        if not self.request.user.is_member:
-            raise PermissionDenied("Chỉ hội viên mới có thể đặt lịch tập.")
-
-        # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
-        try:
-            member_profile = self.request.user.member_profile
-            if not member_profile.is_membership_valid:
-                raise PermissionDenied("Tư cách hội viên của bạn đã hết hạn hoặc không hợp lệ.")
-        except MemberProfile.DoesNotExist:
-            raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
-
-        serializer.save()
-
-
-class TrainerWorkoutSessionListView(generics.ListAPIView):
-    """API để PT xem danh sách lịch tập được yêu cầu"""
-    serializer_class = serializers.WorkoutSessionListSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        """Lọc danh sách buổi tập theo PT hiện tại"""
-        if not self.request.user.is_trainer:
-            raise PermissionDenied("Chỉ huấn luyện viên mới có thể xem danh sách này.")
-
-        # Mặc định hiển thị các buổi tập đang chờ duyệt
-        status_filter = self.request.query_params.get('status', 'pending')
-
-        queryset = WorkoutSession.objects.filter(
-            trainer=self.request.user,
-            session_type='pt_session'
-        )
-
-        # Lọc theo trạng thái nếu có
-        if status_filter != 'all':
-            queryset = queryset.filter(status=status_filter)
-
-        return queryset.order_by('session_date', 'start_time')
-
-
-class TrainerWorkoutSessionUpdateView(generics.UpdateAPIView):
-    """API để PT cập nhật trạng thái buổi tập"""
-    serializer_class = serializers.WorkoutSessionUpdateSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    queryset = WorkoutSession.objects.all()
-
-    def get_object(self):
-        obj = super().get_object()
-        if not self.request.user.is_trainer:
-            raise PermissionDenied("Chỉ huấn luyện viên mới có thể cập nhật lịch tập.")
-
-        if obj.trainer != self.request.user:
-            raise PermissionDenied("Bạn không có quyền cập nhật buổi tập này.")
-
-        if obj.session_type != 'pt_session':
-            raise PermissionDenied("Bạn chỉ có thể cập nhật buổi tập PT.")
-
-        return obj
-
-    def perform_update(self, serializer):
-        # Tự động gửi thông báo khi PT cập nhật trạng thái
-        session = self.get_object()
-        new_status = serializer.validated_data.get('status')
-        notes = serializer.validated_data.get('trainer_notes', '')
-
-        serializer.save()
-
-        # Tạo thông báo cho hội viên
-        if new_status == 'confirmed':
-            message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã được PT xác nhận."
-        elif new_status == 'cancelled':
-            message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã bị hủy."
-        elif new_status == 'rescheduled':
-            message = f"PT đề xuất đổi lịch cho buổi tập vào ngày {session.session_date}."
-
-        if notes:
-            message += f" Ghi chú: {notes}"
-
-        # Tạo thông báo cho hội viên
-        Notification.objects.create(
-            user=session.member,
-            title=f"Cập nhật lịch tập - {dict(WorkoutSession.SESSION_STATUS)[new_status]}",
-            message=message,
-            notification_type='session_reminder',
-            related_object_id=session.id
-        )
-
-
-class RescheduleSessionView(generics.GenericAPIView):
-    """API để PT đề xuất thời gian mới cho buổi tập"""
-    serializer_class = serializers.RescheduleSessionSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_session(self, session_id):
-        """Lấy buổi tập từ ID và kiểm tra quyền"""
-        try:
-            return WorkoutSession.objects.get(id=session_id, trainer=self.request.user)
-        except WorkoutSession.DoesNotExist:
-            return Response(
-                {"detail": "Buổi tập không tồn tại hoặc bạn không phải PT của buổi tập này."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-    
-    def post(self, request, session_id, *args, **kwargs):
-        if not request.user.is_trainer:
-            return Response({"detail": "Chỉ huấn luyện viên mới có thể đề xuất lịch tập mới."},
-                            status=status.HTTP_403_FORBIDDEN)
-
-        # Lấy buổi tập từ ID trong URL
-        session = self.get_session(session_id)
-
-        # Truyền session vào context để serializer có thể sử dụng
-        serializer = self.get_serializer(
-            data=request.data,
-            context={'request': request, 'session': session}
-        )
-        serializer.is_valid(raise_exception=True)
-
-        # Tạo bản ghi lịch sử về việc đổi lịch
-        old_date = session.session_date
-        old_start = session.start_time
-
-        # Cập nhật trạng thái và tạo ghi chú
-        reason = serializer.validated_data.get('reason', '')
-        note = f"Đề xuất đổi lịch từ {old_date} {old_start} sang {serializer.validated_data['new_date']} {serializer.validated_data['new_start_time']}. "
-        if reason:
-            note += f"Lý do: {reason}"
-
-        # Cập nhật session
-        session.session_date = serializer.validated_data['new_date']
-        session.start_time = serializer.validated_data['new_start_time']
-        session.end_time = serializer.validated_data['new_end_time']
-        session.status = 'rescheduled'
-        session.trainer_notes = note
-        session.save()
-
-        # Tạo thông báo cho hội viên
-        Notification.objects.create(
-            user=session.member,
-            title="Đề xuất thay đổi lịch tập",
-            message=f"PT {request.user.get_full_name()} đã đề xuất đổi lịch tập của bạn sang ngày {serializer.validated_data['new_date']} lúc {serializer.validated_data['new_start_time']}. {reason}",
-            notification_type='session_reminder',
-            related_object_id=session.id
-        )
-
-        return Response({
-            "detail": "Đã đề xuất lịch tập mới thành công.",
-            "session": {
-                "id": session.id,
-                "member": session.member.get_full_name(),
-                "new_date": session.session_date,
-                "new_start_time": session.start_time,
-                "new_end_time": session.end_time,
-                "status": session.status
-            }
-        }, status=status.HTTP_200_OK)
-
-
-class SubscriptionPackageViewSet(viewsets.ModelViewSet):
+class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     serializer_class = serializers.SubscriptionPackageSerializer
     search_fields = ['member__username', 'package__name', 'status']
     ordering_fields = ['created_at', 'start_date', 'end_date']
     filterset_fields = ['status', 'member', 'package']
-
-    def get_permissions(self):
-        """
-        - GET list: Manager mới xem được danh sách tất cả đăng ký
-        - GET detail: Chủ gói hoặc Manager mới xem được chi tiết
-        - POST/PUT/PATCH/DELETE: Manager mới thực hiện được
-        """
-        if self.action == 'list':
-            permission_classes = [IsManager]
-        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
-            permission_classes = [IsManager]
-        elif self.action in ['retrieve', 'my_subscriptions', 'active_subscription']:
-            permission_classes = [permissions.IsAuthenticated]
-        else:
-            permission_classes = [IsSubscriptionOwnerOrManager]
-        return [permission() for permission in permission_classes]
+    queryset = SubscriptionPackage.objects.none()
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         if self.request.user.is_manager:
@@ -570,7 +559,8 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(self.request, obj)
         return obj
 
-    @action(detail=False, methods=['get'], url_path='my', url_name='my-subscriptions')
+    @action(detail=False, methods=['get'], url_path='my', url_name='my-subscriptions',
+            permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def my_subscriptions(self, request):
         """Lấy danh sách gói đăng ký của người dùng hiện tại"""
         if not request.user.is_member:
@@ -592,7 +582,8 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(subscriptions, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['get'], url_path='active', url_name='active-subscription')
+    @action(detail=False, methods=['get'], url_path='active', url_name='active-subscription',
+            permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def active_subscription(self, request):
         """Lấy gói đăng ký đang hoạt động của người dùng hiện tại"""
         if not request.user.is_member:
@@ -613,27 +604,10 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(subscription)
         return Response(serializer.data)
 
-    def perform_create(self, serializer):
-        # Kiểm tra thành viên
-        member = serializer.validated_data.get('member')
-        if not member:
-            member = self.request.user
-
-        # Nếu không phải manager và không phải chính mình
-        if not self.request.user.is_manager and member != self.request.user:
-            raise PermissionDenied("Bạn không có quyền đăng ký cho người khác")
-
-        # Tạo đăng ký
-        serializer.save()
-
-    from datetime import date, datetime, timedelta
-
-    @action(detail=False, methods=['post'], url_path='register', permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['post'], url_path='register',
+            permission_classes=[permissions.IsAuthenticated, perms.IsMember])
     def register_package(self, request):
         """API cho người dùng đăng ký gói tập"""
-        if not request.user.is_member:
-            return Response({"error": "Chỉ hội viên mới có thể đăng ký gói tập"},
-                            status=status.HTTP_403_FORBIDDEN)
 
         # Thêm thông tin member vào data
         data = request.data.copy()
@@ -650,7 +624,8 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
         except Packages.DoesNotExist:
             return Response({"error": "Gói tập không tồn tại hoặc không còn hiệu lực"},
                             status=status.HTTP_400_BAD_REQUEST)
-
+        # Xử lý remaining_pt_sessions
+        data['remaining_pt_sessions'] = package.pt_sessions
         # Xử lý start_date
         start_date_str = data.get('start_date')
         if not start_date_str:
@@ -698,9 +673,12 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED
         )
 
-    @action(detail=True, methods=['post'], url_path='cancel', permission_classes=[IsSubscriptionOwnerOrManager])
+    @action(detail=True, methods=['post'], url_path='cancel',
+            permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def cancel_subscription(self, request, pk=None):
         """Hủy gói đăng ký"""
+        if not request.user.is_authenticated:
+            return Response({"error": "Bạn chưa đăng nhập."}, status=status.HTTP_401_UNAUTHORIZED)
         subscription = self.get_object()
 
         if subscription.status != 'active':
@@ -722,7 +700,8 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
 
         return Response({"message": "Đã hủy gói đăng ký thành công"})
 
-    @action(detail=True, methods=['post'], url_path='verify-payment', permission_classes=[IsManager])
+    @action(detail=True, methods=['post'], url_path='verify-payment',
+            permission_classes=[permissions.IsAuthenticated, perms.IsManager])
     def verify_payment(self, request, pk=None):
         """Xác nhận thanh toán từ Manager"""
         subscription = self.get_object()
@@ -754,3 +733,792 @@ class SubscriptionPackageViewSet(viewsets.ModelViewSet):
         )
 
         return Response({"message": "Đã xác nhận thanh toán và kích hoạt gói thành công"})
+
+
+class WorkoutSessionViewSet(viewsets.ViewSet):
+    """ViewSet để quản lý các buổi tập"""
+    queryset = WorkoutSession.objects.all()
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        """Trả về serializer tương ứng dựa trên action"""
+        if self.action == 'register':
+            return serializers.WorkoutSessionCreateSerializer
+        elif self.action == 'trainer_sessions':
+            return serializers.WorkoutSessionListScheduleSerializer
+        elif self.action == 'registered_sessions':
+            return serializers.WorkoutSessionListScheduleSerializer
+        elif self.action == 'update' or self.action == 'partial_update':
+            return serializers.WorkoutSessionUpdateSerializer
+        elif self.action == 'reschedule':
+            return serializers.RescheduleSessionSerializer
+        elif self.action == 'weekly_schedule':
+            return serializers.WeeklyScheduleSerializer
+        else:
+            return None
+
+    @action(detail=False, methods=['post'], url_path='member/register', url_name='member-register',
+            permission_classes=[permissions.IsAuthenticated, perms.IsMember])
+    def register(self, request):
+        """API để hội viên đăng ký buổi tập"""
+        # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
+        try:
+            member_profile = request.user.member_profile
+            if not member_profile.is_membership_valid:
+                raise PermissionDenied("Tư cách hội viên của bạn đã hết hạn hoặc không hợp lệ.")
+        except MemberProfile.DoesNotExist:
+            raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
+
+        # Lấy serializer class và khởi tạo nó
+        serializer_class = self.get_serializer_class()
+        serializer = serializer_class(data=request.data, context={'request': request})
+
+        # Xác thực dữ liệu
+        serializer.is_valid(raise_exception=True)
+        # Lưu dữ liệu khi đã xác thực
+        serializer.save(member=request.user)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='trainer/pending-session', url_name='trainer_sessions',
+            permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
+    def trainer_sessions(self, request):
+        """API để PT xem danh sách lịch tập được yêu cầu"""
+
+        # Mặc định hiển thị các buổi tập đang chờ duyệt
+        status_filter = request.query_params.get('status', 'pending')
+
+        queryset = WorkoutSession.objects.filter(
+            trainer=request.user,
+            session_type='pt_session'
+        )
+
+        # Lọc theo trạng thái nếu có
+        if status_filter != 'all':
+            queryset = queryset.filter(status=status_filter)
+
+        queryset = queryset.order_by('session_date', 'start_time')
+
+        serializer = self.get_serializer_class()(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='me/registered-sessions', url_name='member_sessions',
+            permission_classes=[permissions.IsAuthenticated, perms.IsMember])
+    def registered_sessions(self, request):
+        # Lấy các tham số lọc từ request
+        status_filter = request.query_params.get('status', 'all')
+        date_from = request.query_params.get('date_from', None)
+        date_to = request.query_params.get('date_to', None)
+        session_type = request.query_params.get('type', None)
+
+        # Tạo queryset cơ bản
+        queryset = WorkoutSession.objects.filter(member=request.user)
+
+        # Áp dụng các bộ lọc
+        if status_filter != 'all':
+            queryset = queryset.filter(status=status_filter)
+
+        if date_from:
+            queryset = queryset.filter(session_date__gte=date_from)
+
+        if date_to:
+            queryset = queryset.filter(session_date__lte=date_to)
+
+        if session_type:
+            queryset = queryset.filter(session_type=session_type)
+
+        # Sắp xếp kết quả
+        queryset = queryset.order_by('session_date', 'start_time')
+
+        # Phân trang kết quả
+
+        serializer = self.get_serializer_class()(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['PATCH'], url_path='confirm-session', url_name='confirm_session',
+            permission_classes=[permissions.IsAuthenticated])
+    def confirm_session(self, request, pk=None):
+        """Xử lý khi PT cập nhật trạng thái buổi tập"""
+        # Lấy buổi tập theo pk
+        try:
+            session = WorkoutSession.objects.get(pk=pk)
+        except WorkoutSession.DoesNotExist:
+            raise NotFound("Không tìm thấy buổi tập.")
+
+        if request.user.is_trainer:
+            # Nếu là PT, kiểm tra xem PT có phải là người phụ trách buổi tập không
+            if session.trainer != request.user:
+                raise PermissionDenied("Bạn không có quyền cập nhật buổi tập này.")
+            # elif session.member != request.user:
+            #     raise PermissionDenied("Bạn không có quyền cập nhật buổi tập này.")
+
+        if session.session_type != 'pt_session':
+            raise PermissionDenied("Bạn chỉ có thể cập nhật buổi tập PT.")
+            # Kiểm tra request có chứa status hay không
+        if 'status' not in request.data:
+            return Response(
+                {
+                    "status": "Trạng thái là trường bắt buộc. Vui lòng chọn một trạng thái (confirmed, cancelled, hoặc rescheduled)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            # Giới hạn quyền cập nhật trạng thái dựa trên vai trò
+            new_status = request.data.get('status')
+
+            if request.user.is_trainer:
+                # PT có thể cập nhật tất cả các trạng thái
+                valid_statuses = ['confirmed', 'cancelled', 'rescheduled', 'completed']
+            else:
+                # Hội viên chỉ có thể xác nhận hoặc hủy
+                valid_statuses = ['confirmed', 'cancelled']
+
+            if new_status not in valid_statuses:
+                return Response(
+                    {
+                        "status": f"Bạn không có quyền cập nhật trạng thái này. Các trạng thái hợp lệ: {', '.join(valid_statuses)}"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Xử lý cập nhật trạng thái
+        serializer = serializers.WorkoutSessionUpdateSerializer(session, data=request.data, partial=True)
+        if serializer.is_valid():
+            # Lấy dữ liệu từ serializer
+            new_status = serializer.validated_data.get('status')
+
+            # Xử lý notes tùy theo vai trò người dùng
+            if request.user.is_trainer:
+                notes = serializer.validated_data.get('trainer_notes', '')
+                notes_field = 'trainer_notes'
+            else:
+                notes = serializer.validated_data.get('member_notes', '')
+                notes_field = 'member_notes'
+
+            # Lưu thông tin cập nhật
+            serializer.save()
+
+            # Xác định người nhận thông báo (người còn lại)
+            notification_recipient = session.member if request.user.is_trainer else session.trainer
+
+            # Tạo tiêu đề và nội dung thông báo
+            user_type = "PT" if request.user.is_trainer else "Hội viên"
+
+            if new_status == 'confirmed':
+                title = f"Buổi tập đã được xác nhận"
+                message = f"{user_type} đã xác nhận buổi tập vào ngày {session.session_date} lúc {session.start_time}."
+            elif new_status == 'cancelled':
+                title = f"Buổi tập đã bị hủy"
+                message = f"{user_type} đã hủy buổi tập vào ngày {session.session_date} lúc {session.start_time}."
+            elif new_status == 'rescheduled':
+                title = f"Đề xuất đổi lịch buổi tập"
+                message = f"{user_type} đề xuất đổi lịch cho buổi tập vào ngày {session.session_date}."
+            elif new_status == 'completed':
+                title = f"Buổi tập hoàn thành"
+                message = f"{user_type} đã hoàn thành buổi tập vào ngày {session.session_date} lúc {session.start_time}."
+            if notes:
+                message += f" Ghi chú: {notes}"
+
+            # Tạo thông báo cho người còn lại
+            Notification.objects.create(
+                user=notification_recipient,
+                title=title,
+                message=message,
+                notification_type='session_status_update',
+                related_object_id=session.id
+            )
+
+            return Response(serializer.data)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='reschedule', url_name='reschedule-session')
+    def reschedule(self, request, pk=None):
+        """API để PT đề xuất thời gian mới cho buổi tập"""
+        if not request.user.is_trainer:
+            return Response(
+                {"detail": "Chỉ huấn luyện viên mới có thể đề xuất lịch tập mới."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Lấy buổi tập từ ID trong URL
+        try:
+            session = WorkoutSession.objects.get(pk=pk)
+            if session.trainer != request.user:
+                return Response(
+                    {"detail": "Bạn không phải PT của buổi tập này."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except WorkoutSession.DoesNotExist:
+            return Response(
+                {"detail": "Buổi tập không tồn tại."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer_class = self.get_serializer_class()
+        serializer = serializer_class(
+            data=request.data,
+            context={'request': request, 'session': session}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        # Tạo bản ghi lịch sử về việc đổi lịch
+        old_date = session.session_date
+        old_start = session.start_time
+
+        # Cập nhật trạng thái và tạo ghi chú
+        reason = serializer.validated_data.get('reason', '')
+        note = f"Đề xuất đổi lịch từ {old_date} {old_start} sang {serializer.validated_data['new_date']} {serializer.validated_data['new_start_time']}. "
+        if reason:
+            note += f"Lý do: {reason}"
+
+        # Cập nhật session
+        session.session_date = serializer.validated_data['new_date']
+        session.start_time = serializer.validated_data['new_start_time']
+        session.end_time = serializer.validated_data['new_end_time']
+        session.status = 'rescheduled'
+        session.trainer_notes = note
+        session.save()
+
+        # Tạo thông báo cho hội viên
+        Notification.objects.create(
+            user=session.member,
+            title="Đề xuất thay đổi lịch tập",
+            message=f"PT {request.user.get_full_name()} đã đề xuất đổi lịch tập của bạn sang ngày {serializer.validated_data['new_date']} lúc {serializer.validated_data['new_start_time']}. {reason}",
+            notification_type='session_reminder',
+            related_object_id=session.id
+        )
+
+        return Response({
+            "detail": "Đã đề xuất lịch tập mới thành công.",
+            "session": {
+                "id": session.id,
+                "member": session.member.get_full_name(),
+                "new_date": session.session_date,
+                "new_start_time": session.start_time,
+                "new_end_time": session.end_time,
+                "status": session.status
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='weekly-schedule', url_name='weekly_schedule')
+    def weekly_schedule(self, request):
+        """API để xem lịch tập từ thứ 2 đến thứ 7 của tuần hiện tại"""
+
+        # Lấy thời gian hiện tại
+        today = datetime.now().date()
+
+        # Tính thứ mấy trong tuần (isoweekday: Monday=1, Sunday=7)
+        weekday = today.isoweekday()
+
+        # Tìm ngày thứ 2 (đầu tuần)
+        monday = today - timedelta(days=weekday - 1)
+
+        # Tìm ngày thứ 7 (cuối tuần)
+        saturday = monday + timedelta(days=5)
+
+        # Query lịch tập trong khoảng từ thứ 2 đến thứ 7
+        queryset = WorkoutSession.objects.filter(
+            session_date__gte=monday,
+            session_date__lte=saturday
+        )
+
+        # Nếu bạn muốn filter theo PT (user đăng nhập)
+        if request.user.is_trainer:
+            queryset = queryset.filter(trainer=request.user)
+        else:
+            # Nếu là hội viên, thì filter theo member
+            queryset = queryset.filter(member=request.user)
+
+        queryset = queryset.order_by('session_date', 'start_time')
+
+        serializer = self.get_serializer(queryset, many=True)
+
+        return Response({
+            "start_date": monday,
+            "end_date": saturday,
+            "sessions": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='weekly-schedule', url_name='weekly_schedule')
+    def weekly_schedule(self, request):
+        """API để xem lịch tập từ thứ 2 đến thứ 7 của tuần chỉ định"""
+
+        # Lấy tham số tuần (mặc định là tuần hiện tại)
+        week_offset = int(request.query_params.get('week_offset', 0))
+
+        # Lấy thời gian hiện tại
+        today = datetime.now().date()
+
+        # Tính thứ mấy trong tuần (isoweekday: Monday=1, Sunday=7)
+        weekday = today.isoweekday()
+
+        # Tìm ngày thứ 2 (đầu tuần hiện tại)
+        current_monday = today - timedelta(days=weekday - 1)
+
+        # Tính ngày đầu tuần dựa trên offset
+        monday = current_monday + timedelta(weeks=week_offset)
+
+        # Tìm ngày thứ 7 (cuối tuần)
+        saturday = monday + timedelta(days=5)
+
+        # Query lịch tập trong khoảng từ thứ 2 đến thứ 7
+        queryset = WorkoutSession.objects.filter(
+            session_date__gte=monday,
+            session_date__lte=saturday
+        )
+
+        # Lọc theo người dùng
+        user_role = request.query_params.get('role', None)
+        if user_role == 'trainer' and request.user.is_trainer:
+            queryset = queryset.filter(trainer=request.user)
+        elif user_role == 'member' and request.user.is_member:
+            queryset = queryset.filter(member=request.user)
+        elif not user_role:
+            # Mặc định sẽ lọc theo vai trò hiện tại của người dùng
+            if request.user.is_trainer:
+                queryset = queryset.filter(trainer=request.user)
+            elif request.user.is_member:
+                queryset = queryset.filter(member=request.user)
+
+        # Lọc theo trạng thái nếu có
+        status_filter = request.query_params.get('status', None)
+        if status_filter and status_filter != 'all':
+            queryset = queryset.filter(status=status_filter)
+
+        # Sắp xếp kết quả
+        queryset = queryset.order_by('session_date', 'start_time')
+
+        # Grouped by date
+        schedule_by_date = {}
+        for day_offset in range(6):  # Từ thứ 2 đến thứ 7
+            current_date = monday + timedelta(days=day_offset)
+            schedule_by_date[current_date.strftime('%Y-%m-%d')] = {
+                'day_of_week': current_date.isoweekday(),
+                'date': current_date,
+                'sessions': []
+            }
+
+        # Serialize và nhóm phiên tập theo ngày
+        serializer = self.get_serializer_class()(queryset, many=True)
+        for session in serializer.data:
+            date_key = session['session_date']
+            if date_key in schedule_by_date:
+                schedule_by_date[date_key]['sessions'].append(session)
+
+        return Response({
+            "week_info": {
+                "start_date": monday,
+                "end_date": saturday,
+                "week_offset": week_offset,
+                "current_week": week_offset == 0
+            },
+            "schedule": schedule_by_date
+        }, status=status.HTTP_200_OK)
+
+
+class TrainingProgressViewSet(viewsets.ViewSet):
+    serializer_class = serializers.TrainingProgressSerializer
+    permission_classes = [permissions.IsAuthenticated, perms.IsTrainerOrMemberOwner]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['health_info', 'workout_session', 'created_by']
+    search_fields = ['notes', 'health_info__user__username']
+    ordering_fields = ['workout_session__session_date', 'weight', 'created_at']
+    ordering = ['-workout_session__session_date']  # Mặc định sắp xếp theo ngày mới nhất
+
+    def get_queryset(self):
+        # PT có thể thấy tất cả bản ghi
+        if self.request.user.is_trainer:
+            return TrainingProgress.objects.all()
+
+        # Hội viên chỉ thấy bản ghi của mình
+        try:
+            health_info = HealthInfo.objects.get(user=self.request.user)
+            return TrainingProgress.objects.filter(health_info=health_info)
+        except HealthInfo.DoesNotExist:
+            return TrainingProgress.objects.none()
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return serializers.TrainingProgressListSerializer
+        elif self.action == 'chart_data':
+            return serializers.TrainingProgressChartDataSerializer
+        return serializers.TrainingProgressSerializer
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        pk = self.kwargs.get('pk')
+        obj = queryset.filter(pk=pk).first()
+        if obj is None:
+            raise NotFound(detail="Không tìm thấy đối tượng.")
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def validate_health_info_workout_session_unique(self, health_info, workout_session, instance_id=None):
+        """Kiểm tra trùng lặp health_info và workout_session"""
+        existing_query = TrainingProgress.objects.filter(
+            health_info=health_info,
+            workout_session=workout_session
+        )
+
+        # Nếu đang cập nhật, loại trừ bản ghi hiện tại
+        if instance_id:
+            existing_query = existing_query.exclude(pk=instance_id)
+
+        if existing_query.exists():
+            raise ValidationError({
+                "workout_session": f"Đã tồn tại bản ghi tiến độ cho buổi tập này của hội viên này."
+            })
+
+    def create(self, request):
+        """Phương thức POST để tạo bản ghi tiến độ mới"""
+        workout_session_id = request.data.get('workout_session')
+
+        try:
+            workout_session = WorkoutSession.objects.get(id=workout_session_id)
+
+            # Kiểm tra xem người dùng hiện tại có phải là trainer của buổi tập không
+            if request.user != workout_session.trainer:
+                raise PermissionDenied(detail="Chỉ trainer của buổi tập mới được phép tạo bản ghi tiến độ.")
+
+            # Kiểm tra trạng thái buổi tập
+            if workout_session.status != 'completed':
+                raise ValidationError({"workout_session": "Chỉ buổi tập đã hoàn thành mới có thể tạo bản ghi tiến độ."})
+
+            # Kiểm tra đã có bản ghi tiến độ cho buổi tập này chưa
+            if TrainingProgress.objects.filter(workout_session=workout_session).exists():
+                raise ValidationError({"workout_session": "Buổi tập này đã có bản ghi tiến độ."})
+
+            # Tự động lấy health_info của hội viên
+            try:
+                health_info = HealthInfo.objects.get(user=workout_session.member)
+            except HealthInfo.DoesNotExist:
+                raise ValidationError({"error": "Hội viên chưa có thông tin sức khỏe."})
+
+            # Chuẩn bị dữ liệu
+            data = request.data.copy()
+            data['health_info'] = health_info.id
+
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instance = serializer.save(created_by=request.user)
+
+            return Response(
+                self.get_serializer(instance).data,
+                status=status.HTTP_201_CREATED
+            )
+
+        except WorkoutSession.DoesNotExist:
+            return Response({"error": "Không tìm thấy buổi tập."}, status=status.HTTP_404_NOT_FOUND)
+
+    def partial_update(self, request, pk=None):
+        """Phương thức PATCH để cập nhật một phần bản ghi tiến độ"""
+
+        instance = self.get_object()
+
+        # Chỉ PT của buổi tập mới được phép sửa
+        if request.user != instance.workout_session.trainer:
+            raise PermissionDenied(detail="Chỉ trainer của buổi tập mới được phép cập nhật bản ghi tiến độ.")
+
+        # Chỉ cho phép cập nhật nếu buổi tập đã hoàn thành
+        if instance.workout_session.status != 'completed':
+            raise ValidationError({"workout_session": "Chỉ buổi tập đã hoàn thành mới được cập nhật bản ghi tiến độ."})
+
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        # Kiểm tra trùng lặp nếu health_info hoặc workout_session thay đổi
+        health_info = serializer.validated_data.get('health_info', instance.health_info)
+        workout_session = serializer.validated_data.get('workout_session', instance.workout_session)
+
+        if health_info != instance.health_info or workout_session != instance.workout_session:
+            self.validate_health_info_workout_session_unique(health_info, workout_session, instance_id=instance.id)
+
+        # Cập nhật bản ghi
+        instance = serializer.save()
+
+        return Response(serializer.data)
+
+    def filter_queryset(self, queryset):
+        """Áp dụng bộ lọc cho queryset"""
+        for backend in list(self.filter_backends):
+            queryset = backend().filter_queryset(self.request, queryset, self)
+        return queryset
+
+    def get_serializer(self, *args, **kwargs):
+        """Lấy serializer với context chứa request"""
+        serializer_class = self.get_serializer_class()
+        kwargs.setdefault('context', {
+            'request': self.request,
+            'format': self.format_kwarg,
+            'view': self
+        })
+        return serializer_class(*args, **kwargs)
+
+    @action(detail=False, methods=['get'], url_path='member/(?P<member_id>\d+)')
+    def member_progress(self, request, member_id=None):
+        """Lấy tất cả bản ghi tiến độ của một hội viên cụ thể"""
+        # Kiểm tra quyền - chỉ PT hoặc chính hội viên đó mới xem được
+        user = request.user
+        if not user.is_trainer and user.id != member_id:
+            return Response(
+                {"error": "Bạn không có quyền xem tiến độ của hội viên này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            member = User.objects.get(id=member_id, role='MEMBER')
+            health_info = HealthInfo.objects.get(user=member)
+            progress = self.filter_queryset(
+                TrainingProgress.objects.filter(health_info=health_info)
+            )
+
+            serializer = self.get_serializer(progress, many=True)
+            return Response(serializer.data)
+
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy hội viên"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except HealthInfo.DoesNotExist:
+            return Response(
+                {"error": "Hội viên chưa có thông tin sức khỏe"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=False, methods=['get'], url_path='chart/(?P<member_id>\d+)')
+    def chart_data(self, request, member_id=None):
+        """API để lấy dữ liệu biểu đồ theo thời gian của hội viên"""
+        # Kiểm tra quyền - chỉ PT hoặc chính hội viên đó mới xem được
+        user = request.user
+        if not user.is_trainer and user.id != member_id:
+            return Response(
+                {"error": "Bạn không có quyền xem tiến độ của hội viên này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            member = User.objects.get(id=member_id, role='MEMBER')
+            health_info = HealthInfo.objects.get(user=member)
+
+            # Lấy khoảng thời gian nếu có
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+
+            queryset = TrainingProgress.objects.filter(health_info=health_info)
+
+            if start_date:
+                try:
+                    start = datetime.strptime(start_date, '%Y-%m-%d').date()
+                    queryset = queryset.filter(workout_session__session_date__gte=start)
+                except ValueError:
+                    pass
+
+            if end_date:
+                try:
+                    end = datetime.strptime(end_date, '%Y-%m-%d').date()
+                    queryset = queryset.filter(workout_session__session_date__lte=end)
+                except ValueError:
+                    pass
+
+            # Sắp xếp theo ngày tăng dần để biểu đồ dễ đọc
+            progress_records = queryset.order_by('workout_session__session_date')
+
+            if not progress_records.exists():
+                return Response(
+                    {"error": "Không có dữ liệu tiến độ trong khoảng thời gian này"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Lấy thông tin cơ bản của hội viên
+            basic_info = {
+                'member_id': member.id,
+                'username': member.username,
+                'height': health_info.height,
+                'training_goal': health_info.get_training_goal_display(),
+                'bmi': health_info.bmi,
+                'age': health_info.age,
+                'bmr': health_info.bmr
+            }
+
+            # Lấy các chỉ số thay đổi qua thời gian
+            serializer = serializers.TrainingProgressChartDataSerializer(progress_records, many=True)
+
+            # Tìm min/max để biểu đồ có thể set scale
+            stats = {
+                'weight': {
+                    'min': progress_records.aggregate(Min('weight'))['weight__min'],
+                    'max': progress_records.aggregate(Max('weight'))['weight__max'],
+                }
+            }
+            if progress_records.filter(body_fat_percentage__isnull=False).exists():
+                stats['body_fat'] = {
+                    'min': progress_records.filter(body_fat_percentage__isnull=False).aggregate(
+                        Min('body_fat_percentage'))['body_fat_percentage__min'],
+                    'max': progress_records.filter(body_fat_percentage__isnull=False).aggregate(
+                        Max('body_fat_percentage'))['body_fat_percentage__max'],
+                }
+
+            # Tính toán tiến bộ (so sánh giữa bản ghi mới nhất và cũ nhất)
+            if progress_records.count() >= 2:
+                first_record = progress_records.order_by('workout_session__session_date').first()
+                last_record = progress_records.order_by('workout_session__session_date').last()
+
+                progress_stats = {
+                    'date_range': {
+                        'first': first_record.workout_session.session_date,
+                        'last': last_record.workout_session.session_date
+                    },
+                    'weight_change': last_record.weight - first_record.weight
+                }
+
+                # Thêm các chỉ số có sẵn
+                if first_record.body_fat_percentage and last_record.body_fat_percentage:
+                    progress_stats[
+                        'body_fat_change'] = last_record.body_fat_percentage - first_record.body_fat_percentage
+
+                # Thêm các chỉ số khác tương tự
+
+                stats['progress'] = progress_stats
+
+            response_data = {
+                'basic_info': basic_info,
+                'chart_data': serializer.data,
+                'stats': stats
+            }
+
+            return Response(response_data)
+
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy hội viên"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except HealthInfo.DoesNotExist:
+            return Response(
+                {"error": "Hội viên chưa có thông tin sức khỏe"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=False, methods=['get'], url_path='my-progress')
+    def my_progress(self, request):
+        """Lấy tiến độ của người dùng hiện tại"""
+        if not request.user.is_member:
+            return Response(
+                {"error": "Chỉ hội viên mới có thể sử dụng API này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        return self.member_progress(request, member_id=request.user.id)
+
+    @action(detail=False, methods=['get'], url_path='my-chart',
+            permission_classes=[permissions.IsAuthenticated, perms.IsOwner])
+    def my_chart_data(self, request):
+        """Lấy dữ liệu biểu đồ của người dùng hiện tại"""
+        if not request.user.is_member:
+            return Response(
+                {"error": "Chỉ hội viên mới có thể sử dụng API này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        return self.chart_data(request, member_id=request.user.id)
+
+    @action(detail=False, methods=['get'], url_path='latest/(?P<member_id>\d+)')
+    def latest_progress(self, request, member_id=None):
+        """Lấy bản ghi tiến độ mới nhất của hội viên"""
+        # Kiểm tra quyền
+        user = request.user
+        if not user.is_trainer and str(user.id) != member_id:
+            return Response(
+                {"error": "Bạn không có quyền xem tiến độ của hội viên này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            member = User.objects.get(id=member_id, role='MEMBER')
+            health_info = HealthInfo.objects.get(user=member)
+            latest = TrainingProgress.objects.filter(health_info=health_info).order_by(
+                '-workout_session__session_date').first()
+
+            if not latest:
+                return Response(
+                    {"error": "Chưa có bản ghi tiến độ nào cho hội viên này"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            serializer = self.get_serializer(latest)
+            return Response(serializer.data)
+
+        except (User.DoesNotExist, HealthInfo.DoesNotExist):
+            return Response(
+                {"error": "Không tìm thấy hội viên hoặc thông tin sức khỏe"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    #
+    # @action(detail=False, methods=['post'], url_path='record-progress')
+    # def record_progress(self, request):
+    #     """API để tạo mới hoặc cập nhật bản ghi tiến độ"""
+    #     serializer = self.get_serializer(data=request.data)
+    #     serializer.is_valid(raise_exception=True)
+    #
+    #     health_info = serializer.validated_data.get('health_info')
+    #     workout_session = serializer.validated_data.get('workout_session')
+    #
+    #     # Tìm bản ghi hiện có
+    #     try:
+    #         existing = TrainingProgress.objects.get(
+    #             health_info=health_info,
+    #             workout_session=workout_session
+    #         )
+    #         # Kiểm tra người dùng hiện tại có phải người tạo không
+    #         if existing.created_by != request.user:
+    #             return Response(
+    #                 {"error": "Bạn không có quyền chỉnh sửa bản ghi này vì bạn không phải người tạo"},
+    #                 status=status.HTTP_403_FORBIDDEN
+    #             )
+    #
+    #         # Cập nhật bản ghi hiện có
+    #         update_serializer = self.get_serializer(existing, data=request.data, partial=True)
+    #         update_serializer.is_valid(raise_exception=True)
+    #         instance = update_serializer.save()
+    #         return Response(self.get_serializer(instance).data)
+    #     except TrainingProgress.DoesNotExist:
+    #         # Tạo mới nếu chưa tồn tại
+    #         instance = serializer.save(created_by=request.user)
+    #         return Response(
+    #             self.get_serializer(instance).data,
+    #             status=status.HTTP_201_CREATED
+    #         )
+    #
+    # @action(detail=False, methods=['post'], url_path='record-progress')
+    # def record_progress(self, request):
+    #     """API để tạo mới hoặc cập nhật bản ghi tiến độ"""
+    #     serializer = self.get_serializer(data=request.data)
+    #     serializer.is_valid(raise_exception=True)
+    #
+    #     health_info = serializer.validated_data.get('health_info')
+    #     workout_session = serializer.validated_data.get('workout_session')
+    #
+    #     # Tìm bản ghi hiện có
+    #     try:
+    #         existing = TrainingProgress.objects.get(
+    #             health_info=health_info,
+    #             workout_session=workout_session
+    #         )
+    #         # Kiểm tra người dùng hiện tại có phải người tạo không
+    #         if existing.created_by != request.user:
+    #             return Response(
+    #                 {"error": "Bạn không có quyền chỉnh sửa bản ghi này vì bạn không phải người tạo"},
+    #                 status=status.HTTP_403_FORBIDDEN
+    #             )
+    #
+    #         # Cập nhật bản ghi hiện có
+    #         update_serializer = self.get_serializer(existing, data=request.data, partial=True)
+    #         update_serializer.is_valid(raise_exception=True)
+    #         instance = update_serializer.save()
+    #         return Response(self.get_serializer(instance).data)
+    #     except TrainingProgress.DoesNotExist:
+    #         # Tạo mới nếu chưa tồn tại
+    #         instance = serializer.save(created_by=request.user)
+    #         return Response(
+    #             self.get_serializer(instance).data,
+    #             status=status.HTTP_201_CREATED
+    #         )

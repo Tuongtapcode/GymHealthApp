@@ -1,12 +1,12 @@
 from django.contrib.auth.password_validation import validate_password
 from django.db.models import FloatField
 from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanField, SerializerMethodField, DateField, \
-    IntegerField, TimeField
-from rest_framework.relations import PrimaryKeyRelatedField
+    IntegerField, TimeField, ReadOnlyField
+
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from datetime import date, timedelta
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
-    WorkoutSession, SubscriptionPackage, Promotion, Notification
+    WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress
 
 
 class UserSerializer(ModelSerializer):
@@ -14,10 +14,11 @@ class UserSerializer(ModelSerializer):
     weight = FloatField(required=False)
     training_goal = ChoiceField(choices=HealthInfo.GOAL_CHOICES, required=False)
     health_conditions = CharField(required=False, allow_blank=True)
-    avatar = ImageField(required=False)
-    password = CharField(write_only=True, validators=[validate_password])
+    # avatar = ImageField(required=False)
+    password = CharField(write_only=True)  # , validators=[validate_password]
     password2 = CharField(write_only=True)  # Thêm trường xác nhận mật khẩu
 
+    # Thêm field tùy chỉnh (avatar và role ) nên cần xử lý định dạng
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Xử lý cẩn thận trường hợp avatar là None
@@ -61,15 +62,19 @@ class UserSerializer(ModelSerializer):
         return value
 
     def create(self, validated_data):
+        role = validated_data.get('role')
+        if role not in ['MEMBER', 'TRAINER']:
+            raise ValidationError("Role phải là 'MEMBER' hoặc 'TRAINER'. Bạn không thể tạo user khác role này.")
+        data = validated_data.copy()
         # Tách các field liên quan đến sức khỏe ra
-        height = validated_data.pop('height', None)
-        weight = validated_data.pop('weight', None)
-        training_goal = validated_data.pop('training_goal', None)
-        health_conditions = validated_data.pop('health_conditions', '')
+        height = data.pop('height', None)
+        weight = data.pop('weight', None)
+        training_goal = data.pop('training_goal', None)
+        health_conditions = data.pop('health_conditions', '')
 
         # Tạo User
-        password = validated_data.pop('password')
-        user = User(**validated_data)
+        password = data.pop('password')
+        user = User(**data)
         user.set_password(password)
         user.save()
 
@@ -96,6 +101,8 @@ class HealthInfoSerializer(ModelSerializer):
     class Meta:
         model = HealthInfo
         fields = '__all__'
+        # Các trường chỉ đọc
+        # Người dùng không được phép cung cấp hoặc chỉnh sửa giá trị của các trường này thông qua API.
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
 
     def validate(self, data):
@@ -472,7 +479,7 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
         return workout_session
 
 
-class WorkoutSessionListSerializer(ModelSerializer):
+class WorkoutSessionListScheduleSerializer(ModelSerializer):
     member_name = SerializerMethodField()
 
     class Meta:
@@ -491,7 +498,7 @@ class WorkoutSessionUpdateSerializer(ModelSerializer):
 
     def validate_status(self, value):
         # Chỉ chấp nhận một số trạng thái nhất định cho PT
-        valid_statuses = ['confirmed', 'cancelled', 'rescheduled']
+        valid_statuses = ['confirmed', 'cancelled', 'rescheduled','completed']
         if value not in valid_statuses:
             raise ValidationError(f"Trạng thái không hợp lệ. Chọn một trong: {', '.join(valid_statuses)}")
         return value
@@ -525,3 +532,145 @@ class RescheduleSessionSerializer(Serializer):
             raise ValidationError("Thời gian này đã có lịch tập khác. Vui lòng chọn thời gian khác.")
 
         return data
+
+
+class WeeklyScheduleSerializer(ModelSerializer):
+    member_name = SerializerMethodField()
+    trainer_name = SerializerMethodField()
+
+    class Meta:
+        model = WorkoutSession
+        fields = ['id', 'session_date', 'start_time', 'end_time', 'session_type',
+                  'status', 'notes', 'member_name', 'trainer_name']
+
+    def get_member_name(self, obj):
+        return f"{obj.member.first_name} {obj.member.last_name}" if obj.member else ""
+
+    def get_trainer_name(self, obj):
+        if obj.trainer:
+            return f"{obj.trainer.first_name} {obj.trainer.last_name}"
+        return None
+
+
+class TrainingProgressSerializer(ModelSerializer):
+    member_username = SerializerMethodField()
+    trainer_username = SerializerMethodField()
+    date = SerializerMethodField()  # Thêm field ảo để lấy date từ workout_session
+
+    class Meta:
+        model = TrainingProgress
+        fields = [
+            'id', 'health_info', 'date', 'weight', 'body_fat_percentage',
+            'muscle_mass', 'chest', 'waist', 'hips', 'thighs', 'arms',
+            'cardio_endurance', 'strength_bench', 'strength_squat',
+            'strength_deadlift', 'notes', 'created_by', 'created_at',
+            'member_username', 'trainer_username', 'workout_session'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'date']
+
+    def get_member_username(self, obj):
+        return obj.health_info.user.username
+
+    def get_trainer_username(self, obj):
+        return obj.created_by.username
+
+    def get_date(self, obj):
+        return obj.workout_session.session_date
+
+    def validate(self, data):
+        # Kiểm tra cân nặng hợp lý
+        if data.get('weight') is not None and data['weight'] <= 0:
+            raise ValidationError({"weight": "Cân nặng phải lớn hơn 0"})
+
+        # Kiểm tra phần trăm mỡ cơ thể nếu được cung cấp
+        if data.get('body_fat_percentage') is not None:
+            if data['body_fat_percentage'] < 3 or data['body_fat_percentage'] > 70:
+                raise ValidationError({"body_fat_percentage": "Phần trăm mỡ cơ thể phải từ 3% đến 70%"})
+
+        # Kiểm tra các giá trị số đo nếu được cung cấp
+        for field in ['muscle_mass', 'chest', 'waist', 'hips', 'thighs', 'arms']:
+            if data.get(field) is not None and data[field] <= 0:
+                raise ValidationError({field: f"{field.capitalize()} phải lớn hơn 0"})
+
+        # Kiểm tra các giá trị hiệu suất nếu được cung cấp
+        for field in ['cardio_endurance', 'strength_bench', 'strength_squat', 'strength_deadlift']:
+            if data.get(field) is not None and data[field] < 0:
+                raise ValidationError({field: f"{field.capitalize()} không thể âm"})
+
+        # Kiểm tra workout_session
+        workout_session = data.get('workout_session')
+        health_info = data.get('health_info')
+
+        if workout_session:
+            # Kiểm tra status của workout_session
+            if workout_session.status != 'completed':
+                raise ValidationError({
+                    "workout_session": "Chỉ buổi tập có trạng thái 'Đã hoàn thành' mới có thể liên kết với bản ghi tiến độ."
+                })
+
+            # Lấy ID của bản ghi hiện tại (nếu đang cập nhật)
+            instance_id = self.instance.id if self.instance else None
+
+            # Kiểm tra xem đã có bản ghi nào cho workout_session này chưa
+            existing = TrainingProgress.objects.filter(
+                workout_session=workout_session
+            )
+
+            # Nếu đang cập nhật, loại trừ bản ghi hiện tại khỏi việc kiểm tra
+            if instance_id:
+                existing = existing.exclude(id=instance_id)
+
+            if existing.exists():
+                raise ValidationError({
+                    "workout_session": "Buổi tập này đã được liên kết với một bản ghi tiến độ khác."
+                })
+
+            # Kiểm tra xem workout_session có thuộc về cùng hội viên không
+            if health_info and workout_session.member != health_info.user:
+                raise ValidationError({
+                    "workout_session": "Buổi tập này không thuộc về hội viên được chọn."
+                })
+
+        return data
+
+
+class TrainingProgressListSerializer(ModelSerializer):
+    """Serializer ngắn gọn hơn để hiển thị trong danh sách"""
+    member_username = SerializerMethodField()
+    trainer_username = SerializerMethodField()
+    date = SerializerMethodField()  # Thêm field ảo
+
+    class Meta:
+        model = TrainingProgress
+        fields = [
+            'id', 'health_info', 'date', 'weight', 'body_fat_percentage',
+            'muscle_mass', 'chest', 'waist', 'hips', 'thighs', 'arms',
+            'cardio_endurance', 'strength_bench', 'strength_squat',
+            'strength_deadlift', 'notes', 'created_by', 'created_at',
+            'member_username', 'trainer_username', 'workout_session'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'date']
+
+    def get_member_username(self, obj):
+        return obj.health_info.user.username
+
+    def get_trainer_username(self, obj):
+        return obj.created_by.username
+
+    def get_date(self, obj):
+        return obj.workout_session.session_date
+
+
+class TrainingProgressChartDataSerializer(ModelSerializer):
+    """Serializer để trả về dữ liệu biểu đồ theo thời gian"""
+    date = SerializerMethodField()  # Thêm field ảo
+
+    class Meta:
+        model = TrainingProgress
+        fields = ['date', 'weight', 'body_fat_percentage', 'muscle_mass',
+                  'chest', 'waist', 'hips', 'thighs', 'arms',
+                  'cardio_endurance', 'strength_bench', 'strength_squat',
+                  'strength_deadlift', 'workout_session']
+
+    def get_date(self, obj):
+        return obj.workout_session.session_date

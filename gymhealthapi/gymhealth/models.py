@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.contrib.auth.base_user import BaseUserManager
 from django.db import models
 from django.contrib.auth.models import AbstractUser
@@ -5,6 +7,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 from cloudinary.models import CloudinaryField
 from ckeditor.fields import RichTextField
+from rest_framework.exceptions import ValidationError
 
 
 class UserManager(BaseUserManager):
@@ -65,37 +68,6 @@ class User(AbstractUser):
         return f"{self.username} - {self.get_role_display()}"
 
 
-class HealthInfo(models.Model):
-    GOAL_CHOICES = (
-        ('weight_loss', 'Giảm cân'),
-        ('muscle_gain', 'Tăng cơ'),
-        ('endurance', 'Tăng sức bền'),
-        ('flexibility', 'Tăng tính linh hoạt'),
-        ('general_fitness', 'Thể lực tổng quát'),
-    )
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='health_info')
-    height = models.FloatField(help_text='Chiều cao (cm)')
-    weight = models.FloatField(help_text='Cân nặng (kg)')
-    training_goal = models.CharField(max_length=20, choices=GOAL_CHOICES)
-    health_conditions = RichTextField(help_text='Các vấn đề sức khỏe đặc biệt')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    notes = RichTextField(blank=True, null=True, help_text="Ghi chú về tình trạng sức khỏe")
-    # Thông tin sức khỏe bổ sung (có thể mở rộng thêm)
-    body_fat_percentage = models.FloatField(blank=True, null=True,
-                                            validators=[MinValueValidator(3), MaxValueValidator(70)])
-    blood_pressure = models.CharField(max_length=20, blank=True, null=True, help_text="Định dạng: 120/80")
-    medical_conditions = RichTextField(blank=True, null=True, help_text="Các vấn đề sức khỏe cần lưu ý")
-
-    def __str__(self):
-        return f"Thông tin sức khỏe của {self.user.username}"
-
-    @property
-    def bmi(self):
-        return round(self.weight / ((self.height / 100) ** 2), 1)
-
-
 class MemberProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='member_profile')
     membership_start_date = models.DateField(auto_now_add=True)
@@ -111,6 +83,7 @@ class MemberProfile(models.Model):
     def __str__(self):
         return f"Hồ sơ của {self.user.username}"
 
+    # Thuộc tính kiểm tra tư cách hội viên còn hiệu lực hay không
     @property
     def is_membership_valid(self):
         """Kiểm tra tư cách hội viên còn hiệu lực hay không"""
@@ -157,7 +130,6 @@ class PackageType(BaseModel):
 class Benefit(BaseModel):
     name = models.CharField(max_length=100, verbose_name="Tên quyền lợi")
     description = RichTextField(blank=True, null=True, verbose_name="Mô tả chi tiết")
-    icon = models.CharField(max_length=50, blank=True, null=True, verbose_name="Icon")
 
     def __str__(self):
         return self.name
@@ -344,16 +316,32 @@ class WorkoutSession(models.Model):
 
 
 class TrainingProgress(models.Model):
-    health_info = models.ForeignKey(HealthInfo, on_delete=models.CASCADE, related_name='progress_records')
-    date = models.DateField()
+    workout_session = models.OneToOneField(WorkoutSession, on_delete=models.CASCADE,
+                                           related_name='progress_record')
+    health_info = models.ForeignKey("HealthInfo", on_delete=models.CASCADE,
+                                    related_name='progress_records')
+    # Các chỉ số cơ thể
     weight = models.FloatField(help_text='Cân nặng (kg)')
     body_fat_percentage = models.FloatField(blank=True, null=True)
     muscle_mass = models.FloatField(blank=True, null=True, help_text='Khối lượng cơ (kg)')
+
+    # Các số đo
     chest = models.FloatField(blank=True, null=True, help_text='Số đo ngực (cm)')
     waist = models.FloatField(blank=True, null=True, help_text='Số đo vòng eo (cm)')
     hips = models.FloatField(blank=True, null=True, help_text='Số đo vòng hông (cm)')
     thighs = models.FloatField(blank=True, null=True, help_text='Số đo đùi (cm)')
     arms = models.FloatField(blank=True, null=True, help_text='Số đo cánh tay (cm)')
+    # Chỉ số hiệu suất
+    cardio_endurance = models.IntegerField(blank=True, null=True,
+                                           help_text='Thời gian chịu đựng cardio (phút)')
+    strength_bench = models.FloatField(blank=True, null=True,
+                                       help_text='1RM Bench Press (kg)')
+    strength_squat = models.FloatField(blank=True, null=True,
+                                       help_text='1RM Squat (kg)')
+    strength_deadlift = models.FloatField(blank=True, null=True,
+                                          help_text='1RM Deadlift (kg)')
+
+    # Ghi chú và thông tin khác
     notes = RichTextField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_progress_records')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -362,10 +350,68 @@ class TrainingProgress(models.Model):
     class Meta:
         verbose_name = "Bản ghi tiến độ"
         verbose_name_plural = "Bản ghi tiến độ"
-        ordering = ['-date']
+        ordering = ['-id']
+
+    def save(self, *args, **kwargs):
+        # Đảm bảo health_info là của member trong workout_session
+        if self.health_info.user != self.workout_session.member:
+            raise ValidationError("Health info must belong to the member in workout session")
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Tiến độ của {self.health_info.user.username} ngày {self.date}"
+        return f"Tiến độ của {self.health_info.user.username} ngày {self.workout_session.session_date}"
+
+
+class HealthInfo(models.Model):
+    GOAL_CHOICES = (
+        ('weight_loss', 'Giảm cân'),
+        ('muscle_gain', 'Tăng cơ'),
+        ('endurance', 'Tăng sức bền'),
+        ('flexibility', 'Tăng tính linh hoạt'),
+        ('general_fitness', 'Thể lực tổng quát'),
+    )
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='health_info')
+    height = models.FloatField(help_text='Chiều cao (cm)')
+    weight = models.FloatField(help_text='Cân nặng (kg)')
+    training_goal = models.CharField(max_length=20, choices=GOAL_CHOICES)
+    health_conditions = RichTextField(help_text='Các vấn đề sức khỏe đặc biệt')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    notes = RichTextField(blank=True, null=True, help_text="Ghi chú về tình trạng sức khỏe")
+    # Thông tin sức khỏe bổ sung (có thể mở rộng thêm)
+    body_fat_percentage = models.FloatField(blank=True, null=True,
+                                            validators=[MinValueValidator(3), MaxValueValidator(70)])
+    blood_pressure = models.CharField(max_length=20, blank=True, null=True, help_text="Định dạng: 120/80")
+    medical_conditions = RichTextField(blank=True, null=True, help_text="Các vấn đề sức khỏe cần lưu ý")
+
+    def __str__(self):
+        return f"Thông tin sức khỏe của {self.user.username}"
+
+    @property
+    def bmi(self):
+        return round(self.weight / ((self.height / 100) ** 2), 1)
+
+    @property
+    def age(self):
+        if not self.user.date_of_birth:
+            return None
+        today = datetime.today()
+        return today.year - self.user.date_of_birth.year - (
+                (today.month, today.day) < (self.user.date_of_birth.month, self.user.date_of_birth.day))
+
+    @property
+    def bmr(self):
+        """Tính chỉ số trao đổi chất cơ bản (BMR) theo công thức Harris-Benedict"""
+        if not self.user.gender or not self.age:
+            return None
+
+        gender = self.user.gender.lower()
+        if gender == 'male' or gender == 'nam':
+            return round(88.362 + (13.397 * self.weight) + (4.799 * self.height) - (5.677 * self.age), 2)
+        elif gender == 'female' or gender == 'nữ':
+            return round(447.593 + (9.247 * self.weight) + (3.098 * self.height) - (4.330 * self.age), 2)
+        return None
 
 
 # Mô hình theo dõi các bài tập và thành tích
