@@ -1,13 +1,6 @@
 from rest_framework import permissions, exceptions
 
 
-# class IsOwner(permissions.IsAuthenticated):
-#     """
-#     Chỉ cho phép người dùng là chủ sở hữu của object truy cập.
-#     """
-#     def has_object_permission(self, request, view, obj):
-#         return super().has_permission(request, view) and request.user == obj.user
-
 class IsOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         return obj.user == request.user
@@ -149,3 +142,79 @@ class IsCreatorOrReadOnly(permissions.BasePermission):
 
         # Chỉ người tạo mới được sửa
         return obj.created_by == request.user
+
+
+# Permissions cho hệ thống đánh giá
+
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    """
+    Cho phép sửa/xóa chỉ khi user là người tạo nội dung
+    """
+
+    def has_object_permission(self, request, view, obj):
+        # Quyền đọc cho tất cả
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Quyền ghi chỉ cho người sở hữu
+        return obj.user == request.user
+
+
+class IsRatingOwnerOrAdmin(permissions.BasePermission):
+    """
+    Cho phép xóa rating chỉ khi user là người tạo hoặc admin/manager
+    """
+
+    def has_object_permission(self, request, view, obj):
+        # Quyền đọc cho tất cả
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Quyền ghi cho người sở hữu hoặc admin/manager
+        return obj.user == request.user or request.user.is_staff or request.user.is_manager
+
+
+class IsResponseOwnerOrAdmin(permissions.BasePermission):
+    """
+    Cho phép sửa/xóa phản hồi chỉ khi user là người tạo hoặc admin/manager
+    """
+
+    def has_object_permission(self, request, view, obj):
+        # Quyền đọc cho tất cả
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Quyền ghi cho người sở hữu hoặc admin/manager
+        return obj.responder == request.user or request.user.is_staff or request.user.is_manager
+
+
+class CanRespondToRating(permissions.BasePermission):
+    """
+    Cho phép tạo phản hồi chỉ khi user là huấn luyện viên được đánh giá,
+    quản lý gym, hoặc admin
+    """
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        user = request.user
+        # Nếu là admin hoặc manager, luôn cho phép
+        if user.is_staff or user.is_manager:
+            return True
+
+        # Lấy đánh giá từ URL
+        rating_id = view.kwargs.get('rating_id')
+        if not rating_id:
+            return False
+
+        # Nếu là trainer và đang phản hồi đánh giá về mình
+        if user.is_trainer:
+            from .models import TrainerRating
+            try:
+                rating = TrainerRating.objects.get(id=rating_id)
+                return rating.trainer == user
+            except TrainerRating.DoesNotExist:
+                pass
+
+        return False

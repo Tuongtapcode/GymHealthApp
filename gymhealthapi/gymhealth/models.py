@@ -555,82 +555,91 @@ class PaymentReceipt(models.Model):
         return f"Biên lai cho {self.payment}"
 
 
-class Rating(models.Model):
-    RATING_TYPES = (
-        ('trainer', 'Huấn luyện viên'),
-        ('facility', 'Cơ sở vật chất'),
-        ('service', 'Dịch vụ'),
-        ('class', 'Lớp tập'),
-        ('overall', 'Tổng thể'),
+class BaseRating(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='%(class)s_given')
+    score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Điểm đánh giá"
     )
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings_given')
-    rating_type = models.CharField(max_length=20, choices=RATING_TYPES)
-    # Object ID sẽ là ID của đối tượng được đánh giá (PT, cơ sở, dịch vụ...)
-    object_id = models.IntegerField(null=True, blank=True)
-    score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    comment = RichTextField(blank=True, null=True)
-    anonymous = models.BooleanField(default=False)
+    comment = RichTextField(blank=True, null=True, verbose_name="Nhận xét")
+    anonymous = models.BooleanField(default=False, verbose_name="Ẩn danh")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Đánh giá"
-        verbose_name_plural = "Đánh giá"
+        abstract = True
         ordering = ['-created_at']
-        # Đảm bảo mỗi người dùng chỉ đánh giá một lần cho mỗi đối tượng
-        unique_together = ['user', 'rating_type', 'object_id']
-
-    def __str__(self):
-        if self.rating_type == 'trainer':
-            try:
-                rated_object = User.objects.get(id=self.object_id)
-                return f"Đánh giá PT {rated_object.username} bởi {self.user.username}"
-            except User.DoesNotExist:
-                pass
-        return f"Đánh giá {self.get_rating_type_display()} bởi {self.user.username}"
-
-
-class TrainerRating(models.Model):
-    trainer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_ratings')
-    member = models.ForeignKey(User, on_delete=models.CASCADE, related_name='trainer_ratings')
-    knowledge_score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)],
-                                          verbose_name="Kiến thức chuyên môn")
-    communication_score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)],
-                                              verbose_name="Kỹ năng giao tiếp")
-    punctuality_score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)],
-                                            verbose_name="Đúng giờ")
-    overall_score = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)],
-                                        verbose_name="Đánh giá tổng thể")
-    comment = RichTextField(blank=True, null=True)
-    anonymous = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Đánh giá huấn luyện viên"
-        verbose_name_plural = "Đánh giá huấn luyện viên"
-        ordering = ['-created_at']
-        unique_together = ['trainer', 'member']
 
     def __str__(self):
         if self.anonymous:
-            return f"Đánh giá ẩn danh cho PT {self.trainer.username}"
-        return f"Đánh giá PT {self.trainer.username} bởi {self.member.username}"
+            return f"Đánh giá ẩn danh {self.score} sao"
+        return f"Đánh giá {self.score} sao bởi {self.user.username}"
+
+
+class TrainerRating(BaseRating):
+    trainer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings')
+    knowledge_score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Kiến thức chuyên môn"
+    )
+    communication_score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Kỹ năng giao tiếp"
+    )
+    punctuality_score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Đúng giờ"
+    )
+
+    class Meta(BaseRating.Meta):
+        verbose_name = "Đánh giá huấn luyện viên"
+        verbose_name_plural = "Đánh giá huấn luyện viên"
+        unique_together = (('user', 'trainer'),)
 
     @property
     def average_score(self):
-        """Tính điểm trung bình từ các điểm thành phần"""
-        scores = [self.knowledge_score, self.communication_score, self.punctuality_score, self.overall_score]
-        return sum(scores) / len(scores)
+        scores = [self.knowledge_score, self.communication_score, self.punctuality_score, self.score]
+        return round(sum(scores) / len(scores), 1)
+
+    def __str__(self):
+        if self.anonymous:
+            return f"Đánh giá ẩn danh cho PT {self.trainer}"
+        return f"Đánh giá PT {self.trainer} bởi {self.user.username}"
+
+
+class GymRating(BaseRating):
+    gym = models.ForeignKey('Gym', on_delete=models.CASCADE, related_name='ratings')
+    facility_score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Cơ sở vật chất"
+    )
+    service_score = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Chất lượng dịch vụ"
+    )
+
+    def average_score(self):
+        scores = [self.facility_score, self.service_score, self.score]
+        return round(sum(scores) / len(scores), 1)
+
+    def __str__(self):
+        if self.anonymous:
+            return f"Đánh giá ẩn danh cho phòng gym {self.gym}"
+        return f"Đánh giá phòng gym {self.gym} bởi {self.user.username}"
 
 
 class FeedbackResponse(models.Model):
-    rating = models.ForeignKey(Rating, on_delete=models.CASCADE, related_name='responses', null=True, blank=True)
-    trainer_rating = models.ForeignKey(TrainerRating, on_delete=models.CASCADE, related_name='responses', null=True,
-                                       blank=True)
+    trainer_rating = models.ForeignKey(
+        TrainerRating, on_delete=models.CASCADE,
+        related_name='responses', null=True, blank=True
+    )
+    gym_rating = models.ForeignKey(
+        GymRating, on_delete=models.CASCADE,
+        related_name='responses', null=True, blank=True
+    )
+
     responder = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feedback_responses')
-    response_text = RichTextField()
+    response_text = RichTextField(verbose_name="Nội dung phản hồi")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -640,9 +649,11 @@ class FeedbackResponse(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        if self.rating:
-            return f"Phản hồi cho đánh giá ID:{self.rating.id}"
-        return f"Phản hồi cho đánh giá PT ID:{self.trainer_rating.id}"
+        if self.trainer_rating:
+            return f"Phản hồi cho đánh giá PT {self.trainer_rating.trainer}"
+        elif self.gym_rating:
+            return f"Phản hồi cho đánh giá phòng gym {self.gym_rating.gym}"
+        return f"Phản hồi cho đánh giá lớp tập {self.class_rating.fitness_class}"
 
 
 class Gym(models.Model):

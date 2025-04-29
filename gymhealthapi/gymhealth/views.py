@@ -6,11 +6,12 @@ from rest_framework.decorators import action
 from gymhealth import serializers, perms
 from rest_framework import viewsets, generics, permissions, status, request, parsers, permissions, filters, mixins
 from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, WorkoutSession, MemberProfile, \
-    TrainerProfile, Promotion, Notification, TrainingProgress
+    TrainerProfile, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
+    FeedbackResponse
 from gymhealth.perms import IsOwner, IsProfileOwnerOrManager
 from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSerializer, BenefitSerializer, \
     PackageTypeSerializer, PackageSerializer, PackageDetailSerializer, TrainerListSerializer, SubscriptionPackage
-from django.db.models import Min, Max
+from django.db.models import Min, Max, Q
 
 
 class UserViewSet(viewsets.ViewSet):
@@ -1522,3 +1523,308 @@ class TrainingProgressViewSet(viewsets.ViewSet):
     #             self.get_serializer(instance).data,
     #             status=status.HTTP_201_CREATED
     #         )
+
+
+### API ratiing:
+
+class TrainerRatingViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint cho đánh giá huấn luyện viên
+    - List/Create: GET/POST /api/trainers/{trainer_id}/ratings/
+    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/ratings/{id}/
+    - Custom actions:
+      + average_rating: GET /api/trainers/{trainer_id}/ratings/average/
+    """
+    serializer_class = serializers.TrainerRatingSerializer
+    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+
+    def get_queryset(self):
+        # Cho phép filter theo trainer_id nếu có trong URL
+        trainer_id = self.kwargs.get('trainer_id')
+        if trainer_id:
+            return TrainerRating.objects.filter(trainer_id=trainer_id)
+        return TrainerRating.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        trainer_id = self.kwargs.get('trainer_id')
+        if trainer_id:
+            context['trainer_id'] = trainer_id
+        return context
+
+    def create(self, request, *args, **kwargs):
+        trainer_id = self.kwargs.get('trainer_id')
+        if not trainer_id:
+            return Response(
+                {"error": "Thiếu trainer_id trong URL"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            trainer = User.objects.get(id=trainer_id, role='TRAINER')
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy huấn luyện viên"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if TrainerRating.objects.filter(user=request.user, trainer_id=trainer_id).exists():
+            return Response(
+                {"error": "Bạn đã đánh giá huấn luyện viên này rồi"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        data = request.data.copy()
+        data['trainer'] = trainer_id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @action(detail=False, methods=['get'], url_path='average')
+    def average_rating(self, request, trainer_id=None):
+        """
+        Lấy điểm trung bình của huấn luyện viên
+        GET /api/trainers/{trainer_id}/ratings/average/
+        """
+        trainer = User.objects.filter(id=trainer_id, role='TRAINER').first()
+        if trainer is None:
+            return Response({"detail": "Không tìm thấy huấn luyện viên."}, status=status.HTTP_404_NOT_FOUND)
+        ratings = TrainerRating.objects.filter(trainer=trainer)
+
+        if not ratings.exists():
+            return Response(
+                {"average": 0, "count": 0},
+                status=status.HTTP_200_OK
+            )
+
+        # Tính toán điểm trung bình
+        avg_knowledge = sum(r.knowledge_score for r in ratings) / ratings.count()
+        avg_communication = sum(r.communication_score for r in ratings) / ratings.count()
+        avg_punctuality = sum(r.punctuality_score for r in ratings) / ratings.count()
+        avg_overall = sum(r.overall_score for r in ratings) / ratings.count()
+
+        data = {
+            "trainer_id": trainer_id,
+            "trainer_name": trainer.get_full_name(),
+            "average_knowledge": round(avg_knowledge, 1),
+            "average_communication": round(avg_communication, 1),
+            "average_punctuality": round(avg_punctuality, 1),
+            "average_overall": round(avg_overall, 1),
+            "total_ratings": ratings.count()
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class GymRatingViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint cho đánh giá phòng gym
+    - List: GET /api/gyms/{gym_id}/ratings/
+    - Create: POST /api/gyms/{gym_id}/ratings/
+    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/ratings/{id}/
+    - Custom actions:
+      + average: GET /api/gyms/{gym_id}/ratings/average/
+    """
+    serializer_class = serializers.GymRatingSerializer
+    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+
+    def get_queryset(self):
+        # Cho phép filter theo gym_id nếu có trong URL
+        gym_id = self.kwargs.get('gym_id')
+        if gym_id:
+            return GymRating.objects.filter(gym_id=gym_id)
+        return GymRating.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        gym_id = self.kwargs.get('gym_id')
+        if gym_id:
+            context['gym_id'] = gym_id
+        return context
+
+    def create(self, request, *args, **kwargs):
+        gym_id = self.kwargs.get('gym_id')
+        if not gym_id:
+            return Response(
+                {"error": "Thiếu gym_id trong URL"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        gym = Gym.objects.filter(id=gym_id).first()
+        if gym is None:
+            return Response(
+                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if GymRating.objects.filter(user=request.user, gym_id=gym_id).exists():
+            return Response(
+                {"error": "Bạn đã đánh giá phòng gym này rồi"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        data = request.data.copy()
+        data['gym'] = gym_id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @action(detail=False, methods=['get'])
+    def average(self, request, gym_id=None):
+        """
+        Lấy điểm trung bình của phòng gym
+        GET /api/gyms/{gym_id}/ratings/average/
+        """
+        gym = Gym.objects.filter(id=gym_id).first()
+        if gym is None:
+            return Response(
+                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        ratings = GymRating.objects.filter(gym=gym)
+
+        if not ratings.exists():
+            return Response(
+                {"average": 0, "count": 0},
+                status=status.HTTP_200_OK
+            )
+
+        avg_facility = sum(r.facility_score for r in ratings) / ratings.count()
+        avg_service = sum(r.service_score for r in ratings) / ratings.count()
+        avg_overall = sum(r.overall_score for r in ratings) / ratings.count()
+
+        data = {
+            "gym_id": gym_id,
+            "gym_name": gym.name,
+            "average_facility": round(avg_facility, 1),
+            "average_service": round(avg_service, 1),
+            "average_overall": round(avg_overall, 1),
+            "total_ratings": ratings.count()
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class FeedbackResponseViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint cho phản hồi đánh giá
+    - List/Create: GET/POST /api/ratings/{rating_id}/responses/
+    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/responses/{id}/
+    - Custom actions:
+      + responses: GET /api/ratings/{rating_id}/responses/ (đã tích hợp sẵn)
+    """
+    serializer_class = serializers.FeedbackResponseSerializer
+    permission_classes = [permissions.IsAuthenticated, perms.IsResponseOwnerOrAdmin]
+
+    def get_queryset(self):
+        # Cho phép filter theo rating_id nếu có trong URL
+        rating_id = self.kwargs.get('rating_id')
+        if rating_id:
+            return FeedbackResponse.objects.filter(
+                Q(trainer_rating_id=rating_id) |
+                Q(gym_rating_id=rating_id))
+        return FeedbackResponse.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        rating_id = self.kwargs.get('rating_id')
+        if rating_id:
+            context['rating_id'] = rating_id
+        return context
+
+    def create(self, request, *args, **kwargs):
+        rating_id = self.kwargs.get('rating_id')
+        if not rating_id:
+            return Response(
+                {"error": "Thiếu rating_id trong URL"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Kiểm tra loại rating và quyền truy cập
+        trainer_rating = None
+        gym_rating = None
+
+        try:
+            trainer_rating = TrainerRating.objects.get(id=rating_id)
+            if not self._check_trainer_rating_permission(request.user, trainer_rating):
+                return Response(
+                    {"error": "Bạn không có quyền phản hồi đánh giá này"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except TrainerRating.DoesNotExist:
+            try:
+                gym_rating = GymRating.objects.get(id=rating_id)
+                if not self._check_gym_rating_permission(request.user, gym_rating):
+                    return Response(
+                        {"error": "Bạn không có quyền phản hồi đánh giá này"},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            except GymRating.DoesNotExist:
+                return Response(
+                    {"error": "Không tìm thấy đánh giá"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        data = request.data.copy()
+        if trainer_rating:
+            data['trainer_rating'] = rating_id
+        elif gym_rating:
+            data['gym_rating'] = rating_id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    def _check_trainer_rating_permission(self, user, trainer_rating):
+        """Kiểm tra quyền phản hồi đánh giá HLV"""
+        return (user.is_staff or user.is_manager or
+                (user.is_trainer and trainer_rating.trainer == user))
+
+    def _check_gym_rating_permission(self, user, gym_rating):
+        """Kiểm tra quyền phản hồi đánh giá phòng gym"""
+        return (user.is_staff or user.is_manager)
+
+    @action(detail=False, methods=['get'], url_path='stats')
+    def response_stats(self, request, rating_id=None):
+        """
+        Lấy thống kê phản hồi cho đánh giá
+        GET /api/ratings/{rating_id}/responses/stats/
+        """
+        responses = self.get_queryset()
+
+        if not responses.exists():
+            return Response(
+                {"message": "Chưa có phản hồi nào cho đánh giá này"},
+                status=status.HTTP_200_OK
+            )
+
+        # Thống kê cơ bản
+        data = {
+            "rating_id": rating_id,
+            "total_responses": responses.count(),
+            "latest_response": serializers.FeedbackResponseSerializer(responses.latest('created_at')).data,
+            "responders": list(responses.values_list('responder__username', flat=True).distinct())
+        }
+
+        return Response(data, status=status.HTTP_200_OK)

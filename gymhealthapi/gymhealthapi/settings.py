@@ -146,5 +146,5 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CLIENT_ID = 'KgAWLILC363FTa1OFD2kCUUipDdeN4o8zbepEllT'
-CLIENT_SECRET = 'LXfuOto0bbcxHzSQSvoSQN2CESYGjGnO1zA0t7VgzoCC2HAs0orFKLm9mjKsdb41gFAFSEpfOYakBR7ynkrlFqbeflKfgsGZ58aagcRsBmvbhx0l7csjxvmX5VczkxLe'
+CLIENT_ID = 'AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh'
+CLIENT_SECRET = '89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o'

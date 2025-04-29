@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import timezone, timedelta
 
 from django.contrib import admin
 from django.contrib.admin import SimpleListFilter
@@ -9,7 +9,7 @@ from django.urls import path
 from gymhealth.models import (
     User, Packages, PackageType, Benefit, Promotion, SubscriptionPackage,
     WorkoutSession, HealthInfo, MemberProfile, TrainerProfile, TrainingProgress,
-    Exercise, Notification, Payment, PaymentReceipt, Rating, TrainerRating,
+    Exercise, Notification, Payment, PaymentReceipt, TrainerRating, GymRating,
     FeedbackResponse, Gym, MemberProxy, TrainerProxy, ManagerProxy
 )
 from django.db.models import Count, Sum, Avg
@@ -33,7 +33,7 @@ class MembershipStatusFilter(SimpleListFilter):
         if self.value() == 'expired':
             return queryset.filter(membership_end_date__lt=timezone.now().date())
         if self.value() == 'expiring_soon':
-            thirty_days_later = timezone.now().date() + timezone.timedelta(days=30)
+            thirty_days_later = timezone.now().date() + timedelta(days=30)
             return queryset.filter(
                 is_active=True,
                 membership_end_date__gte=timezone.now().date(),
@@ -71,7 +71,7 @@ class TrainerProfileInline(admin.StackedInline):
 class TrainingProgressInline(admin.TabularInline):
     model = TrainingProgress
     extra = 0
-    fields = ('date', 'weight', 'body_fat_percentage', 'notes')
+    fields = ('workout_session', 'weight', 'body_fat_percentage', 'notes')
     readonly_fields = ('created_at',)
 
 
@@ -93,7 +93,8 @@ class MyUserAdmin(UserAdmin):
     fieldsets = (
         (None, {'fields': ('username', 'password')}),
         ('Thông tin cá nhân',
-         {'fields': ('first_name', 'last_name', 'email', 'phone_number', 'date_of_birth', 'address', 'avatar')}),
+         {'fields': (
+         'first_name', 'last_name', 'email', 'phone_number', 'date_of_birth', 'address', 'gender', 'avatar')}),
         ('Vai trò', {'fields': ('role',)}),
         ('Quyền hạn', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Ngày quan trọng', {'fields': ('last_login', 'date_joined')}),
@@ -157,7 +158,7 @@ class TrainerAdmin(MyUserAdmin):
     def rating(self, obj):
         ratings = TrainerRating.objects.filter(trainer=obj)
         if ratings.exists():
-            avg = ratings.aggregate(avg=Avg('overall_score'))['avg']
+            avg = ratings.aggregate(avg=Avg('score'))['avg']
             return f"{avg:.1f}/5 ({ratings.count()} đánh giá)"
         return "Chưa có đánh giá"
 
@@ -213,7 +214,6 @@ class HealthInfoAdmin(admin.ModelAdmin):
     list_filter = ('training_goal',)
     search_fields = ('user__username', 'user__first_name', 'user__last_name')
     readonly_fields = ('created_at', 'updated_at', 'bmi')
-    inlines = [TrainingProgressInline]
 
 
 class TrainingProgressAdmin(admin.ModelAdmin):
@@ -282,18 +282,23 @@ class NotificationAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
 
 
-class RatingAdmin(admin.ModelAdmin):
-    list_display = ('user', 'rating_type', 'object_id', 'score', 'anonymous', 'created_at')
-    list_filter = ('rating_type', 'score', 'anonymous', 'created_at')
+class BaseRatingAdmin(admin.ModelAdmin):
+    list_display = ('user', 'score', 'anonymous', 'created_at')
+    list_filter = ('score', 'anonymous', 'created_at')
     search_fields = ('user__username', 'comment')
     date_hierarchy = 'created_at'
 
 
-class TrainerRatingAdmin(admin.ModelAdmin):
-    list_display = ('trainer', 'member', 'overall_score', 'average_score', 'anonymous', 'created_at')
-    list_filter = ('overall_score', 'anonymous', 'created_at')
-    search_fields = ('trainer__username', 'member__username', 'comment')
-    date_hierarchy = 'created_at'
+class TrainerRatingAdmin(BaseRatingAdmin):
+    list_display = ('trainer', 'user', 'score', 'average_score', 'anonymous', 'created_at')
+    list_filter = ('score', 'anonymous', 'created_at')
+    search_fields = ('trainer__username', 'user__username', 'comment')
+
+
+class GymRatingAdmin(BaseRatingAdmin):
+    list_display = ('gym', 'user', 'score', 'average_score', 'anonymous', 'created_at')
+    list_filter = ('score', 'anonymous', 'created_at')
+    search_fields = ('gym__name', 'user__username', 'comment')
 
 
 class MyAdminSite(admin.AdminSite):
@@ -418,15 +423,6 @@ class MyAdminSite(admin.AdminSite):
             'stats': stats
         })
 
-    # def get_urls(self):
-    #     urls = super().get_urls()
-    #     my_urls = [
-    #         path('gymhealth-stats/', self.admin_view(self.gymhealth_stats)),
-    #         path('member-stats/', self.admin_view(self.member_stats)),
-    #         path('revenue-stats/', self.admin_view(self.revenue_stats)),
-    #     ]
-    #     return my_urls + urls
-
     def member_stats(self, request):
         # Biểu đồ tăng trưởng hội viên theo thời gian
         member_growth = User.objects.filter(role='MEMBER').extra(
@@ -490,7 +486,7 @@ admin_site.register(Exercise)
 admin_site.register(Notification, NotificationAdmin)
 admin_site.register(Payment, PaymentAdmin)
 admin_site.register(PaymentReceipt, PaymentReceiptAdmin)
-admin_site.register(Rating, RatingAdmin)
 admin_site.register(TrainerRating, TrainerRatingAdmin)
+admin_site.register(GymRating, GymRatingAdmin)
 admin_site.register(FeedbackResponse)
 admin_site.register(Gym)

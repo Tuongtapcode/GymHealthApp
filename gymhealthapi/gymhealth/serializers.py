@@ -6,7 +6,8 @@ from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanFi
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from datetime import date, timedelta
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
-    WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress
+    WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
+    FeedbackResponse
 
 
 class UserSerializer(ModelSerializer):
@@ -498,7 +499,7 @@ class WorkoutSessionUpdateSerializer(ModelSerializer):
 
     def validate_status(self, value):
         # Chỉ chấp nhận một số trạng thái nhất định cho PT
-        valid_statuses = ['confirmed', 'cancelled', 'rescheduled','completed']
+        valid_statuses = ['confirmed', 'cancelled', 'rescheduled', 'completed']
         if value not in valid_statuses:
             raise ValidationError(f"Trạng thái không hợp lệ. Chọn một trong: {', '.join(valid_statuses)}")
         return value
@@ -674,3 +675,156 @@ class TrainingProgressChartDataSerializer(ModelSerializer):
 
     def get_date(self, obj):
         return obj.workout_session.session_date
+
+
+#
+# Rating
+#
+
+class UserBasicSerializer(ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name', 'avatar']
+
+
+class TrainerRatingSerializer(ModelSerializer):
+    user_details = UserBasicSerializer(source='user', read_only=True)
+    trainer_details = UserBasicSerializer(source='trainer', read_only=True)
+    average_score = FloatField(read_only=True)
+
+    class Meta:
+        model = TrainerRating
+        fields = [
+            'id', 'user', 'user_details', 'trainer', 'trainer_details', 'score',
+            'knowledge_score', 'communication_score', 'punctuality_score',
+            'average_score', 'comment', 'anonymous', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['user', 'user_details', 'trainer_details', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        # Gán user hiện tại là người tạo đánh giá
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class GymRatingSerializer(ModelSerializer):
+    user_details = UserBasicSerializer(source='user', read_only=True)
+    gym_name = CharField(source='gym.name', read_only=True)
+    average_score = FloatField(read_only=True)
+
+    class Meta:
+        model = GymRating
+        fields = [
+            'id', 'user', 'user_details', 'gym', 'gym_name', 'score',
+            'facility_score', 'service_score', 'average_score',
+            'comment', 'anonymous', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['user', 'user_details', 'gym_name', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        # Gán user hiện tại là người tạo đánh giá
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class FeedbackResponseSerializer(ModelSerializer):
+    responder_details = UserBasicSerializer(source='responder', read_only=True)
+
+    class Meta:
+        model = FeedbackResponse
+        fields = [
+            'id', 'trainer_rating', 'gym_rating', 'responder',
+            'responder_details', 'response_text', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['responder', 'responder_details', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        # Gán user hiện tại là người tạo phản hồi
+        validated_data['responder'] = self.context['request'].user
+        return super().create(validated_data)
+
+    def validate(self, attrs):
+        # Kiểm tra xem đã cung cấp đúng loại đánh giá chưa
+        if not attrs.get('trainer_rating') and not attrs.get('gym_rating'):
+            raise ValidationError("Phải chỉ định một đánh giá để phản hồi")
+        if attrs.get('trainer_rating') and attrs.get('gym_rating'):
+            raise ValidationError("Chỉ có thể phản hồi cho một loại đánh giá")
+        return attrs
+
+
+class TrainerAverageRatingSerializer(ModelSerializer):
+    average_overall = SerializerMethodField()
+    average_knowledge = SerializerMethodField()
+    average_communication = SerializerMethodField()
+    average_punctuality = SerializerMethodField()
+    total_ratings = SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'first_name', 'last_name',
+            'average_overall', 'average_knowledge', 'average_communication',
+            'average_punctuality', 'total_ratings'
+        ]
+
+    def get_average_overall(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.score for rating in ratings) / len(ratings), 1)
+
+    def get_average_knowledge(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.knowledge_score for rating in ratings) / len(ratings), 1)
+
+    def get_average_communication(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.communication_score for rating in ratings) / len(ratings), 1)
+
+    def get_average_punctuality(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.punctuality_score for rating in ratings) / len(ratings), 1)
+
+    def get_total_ratings(self, obj):
+        return obj.ratings.count()
+
+
+class GymAverageRatingSerializer(ModelSerializer):
+    average_overall = SerializerMethodField()
+    average_facility = SerializerMethodField()
+    average_service = SerializerMethodField()
+    total_ratings = SerializerMethodField()
+
+    class Meta:
+        model = Gym
+        fields = [
+            'id', 'name', 'address',
+            'average_overall', 'average_facility', 'average_service', 'total_ratings'
+        ]
+
+    def get_average_overall(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.score for rating in ratings) / len(ratings), 1)
+
+    def get_average_facility(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.facility_score for rating in ratings) / len(ratings), 1)
+
+    def get_average_service(self, obj):
+        ratings = obj.ratings.all()
+        if not ratings:
+            return 0
+        return round(sum(rating.service_score for rating in ratings) / len(ratings), 1)
+
+    def get_total_ratings(self, obj):
+        return obj.ratings.count()
