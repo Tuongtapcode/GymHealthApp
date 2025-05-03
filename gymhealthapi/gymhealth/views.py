@@ -3,7 +3,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from gymhealth import serializers, perms
+from rest_framework.views import APIView
+
+from gymhealth import serializers, perms, paginators
 from rest_framework import viewsets, generics, permissions, status, request, parsers, permissions, filters, mixins
 from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, WorkoutSession, MemberProfile, \
     TrainerProfile, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
@@ -14,11 +16,19 @@ from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSeriali
 from django.db.models import Min, Max, Q
 
 
-class UserViewSet(viewsets.ViewSet):
+class UserViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
     queryset = User.objects.filter(is_active=True)
     serializer_class = serializers.UserSerializer
     # Định nghĩa gửi form
     parser_classes = [parsers.MultiPartParser]
+
+    # Thêm các lớp filter và sắp xếp
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['first_name', 'last_name', 'email', 'is_staff']  # Các trường để filter
+    search_fields = ['first_name', 'last_name', 'email', 'username']  # Các trường để tìm kiếm
+    ordering_fields = ['id', 'first_name', 'last_name', 'date_joined']  # Các trường để sắp xếp
+    ordering = ['id']  # Sắp xếp mặc định
+    pagination_class = paginators.ItemPaginator
 
     @action(methods=['get', 'patch'], url_path="current-user", detail=False,
             permission_classes=[permissions.IsAuthenticated])
@@ -37,6 +47,20 @@ class UserViewSet(viewsets.ViewSet):
             return Response(serializers.UserSerializer(u).data)
         else:
             return Response(serializers.UserSerializer(request.user).data)
+
+    @action(methods=['post'], detail=False, url_path='register',
+            permission_classes=[permissions.AllowAny])
+    def register(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        message = "Đăng ký thành công."
+        if getattr(user, 'role', None) == 'MEMBER':
+            message += " Thông tin sức khỏe của bạn đã được lưu lại."
+        return Response({
+            "user": serializer.data,
+            "message": message
+        }, status=status.HTTP_201_CREATED)
 
 
 class UserRegisterView(generics.CreateAPIView):
@@ -64,6 +88,15 @@ class HealthInfoViewSet(viewsets.ViewSet):
     serializer_class = serializers.HealthInfoSerializer
     # Quyền đã đăng nhập và chủ sở hữu mới được sử dụng API
     permission_classes = [permissions.IsAuthenticated, perms.IsOwner]
+    # Phân trang
+    pagination_class = paginators.ItemPaginator
+
+    # Cài đặt bộ lọc
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['blood_type', 'gender', 'height', 'weight', 'user__is_active']
+    search_fields = ['user__username', 'user__email', 'user__first_name', 'user__last_name', 'note']
+    ordering_fields = ['created_date', 'updated_date', 'height', 'weight', 'user__date_joined']
+    ordering = ['-updated_date']  # Mặc định sắp xếp theo ngày cập nhật, mới nhất trước
 
     def get_object(self):
         """
@@ -119,6 +152,7 @@ class HealthInfoViewSet(viewsets.ViewSet):
 class UserProfileView(generics.GenericAPIView):
     # Quyền đã đăng nhập, và sở hữu
     permission_classes = [permissions.IsAuthenticated, perms.IsOwner]
+    pagination_class = paginators.ItemPaginator
 
     def get_serializer_class(self):
         user = self.request.user
@@ -169,6 +203,7 @@ class PackageTypeViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PackageTypeSerializer
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'duration_months']
+    pagination_class = paginators.ItemPaginator
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
@@ -186,6 +221,7 @@ class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     search_fields = ['name', 'description']
     ordering_fields = ['name']
+    pagination_class = paginators.ItemPaginator
 
 
 class PackageViewSet(viewsets.ReadOnlyModelViewSet):
@@ -196,6 +232,7 @@ class PackageViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['price', 'package_type__duration_months', 'pt_sessions']
     filterset_fields = ['package_type', 'pt_sessions', 'price']
     filter_backends = [DjangoFilterBackend]
+    pagination_class = paginators.ItemPaginator
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
@@ -241,6 +278,7 @@ class TrainerListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     search_fields = ['username', 'first_name', 'last_name', 'trainer_profile__specialization']
     ordering_fields = ['trainer_profile__experience_years', 'trainer_profile__hourly_rate']
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         # Lấy tất cả user có role là TRAINER
@@ -289,6 +327,7 @@ class TrainerDetailView(generics.RetrieveAPIView):
     """API để lấy thông tin chi tiết của một PT cụ thể"""
     serializer_class = serializers.TrainerDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
 
     def get_object(self):
         trainer_id = self.kwargs.get('trainer_id')
@@ -304,6 +343,7 @@ class TrainerUpcomingSessionsView(generics.ListAPIView):
     """API để lấy danh sách các buổi tập sắp tới của một PT cụ thể"""
     serializer_class = serializers.WorkoutSessionScheduleSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         trainer_id = self.kwargs.get('trainer_id')
@@ -541,6 +581,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     filterset_fields = ['status', 'member', 'package']
     queryset = SubscriptionPackage.objects.none()
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         if self.request.user.is_manager:
@@ -740,6 +781,7 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
     """ViewSet để quản lý các buổi tập"""
     queryset = WorkoutSession.objects.all()
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
 
     def get_serializer_class(self):
         """Trả về serializer tương ứng dựa trên action"""
@@ -1123,6 +1165,7 @@ class TrainingProgressViewSet(viewsets.ViewSet):
     search_fields = ['notes', 'health_info__user__username']
     ordering_fields = ['workout_session__session_date', 'weight', 'created_at']
     ordering = ['-workout_session__session_date']  # Mặc định sắp xếp theo ngày mới nhất
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         # PT có thể thấy tất cả bản ghi
@@ -1536,7 +1579,8 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
       + average_rating: GET /api/trainers/{trainer_id}/ratings/average/
     """
     serializer_class = serializers.TrainerRatingSerializer
-    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         # Cho phép filter theo trainer_id nếu có trong URL
@@ -1566,12 +1610,6 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Không tìm thấy huấn luyện viên"},
                 status=status.HTTP_404_NOT_FOUND
-            )
-
-        if TrainerRating.objects.filter(user=request.user, trainer_id=trainer_id).exists():
-            return Response(
-                {"error": "Bạn đã đánh giá huấn luyện viên này rồi"},
-                status=status.HTTP_400_BAD_REQUEST
             )
 
         data = request.data.copy()
@@ -1634,6 +1672,7 @@ class GymRatingViewSet(viewsets.ModelViewSet):
     """
     serializer_class = serializers.GymRatingSerializer
     permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         # Cho phép filter theo gym_id nếu có trong URL
@@ -1683,7 +1722,7 @@ class GymRatingViewSet(viewsets.ModelViewSet):
             headers=headers
         )
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], url_path='(?P<gym_id>\d+)/average')
     def average(self, request, gym_id=None):
         """
         Lấy điểm trung bình của phòng gym
@@ -1730,6 +1769,7 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
     """
     serializer_class = serializers.FeedbackResponseSerializer
     permission_classes = [permissions.IsAuthenticated, perms.IsResponseOwnerOrAdmin]
+    pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
         # Cho phép filter theo rating_id nếu có trong URL
