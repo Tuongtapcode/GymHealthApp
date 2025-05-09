@@ -76,7 +76,6 @@ import pymysql
 pymysql.install_as_MySQLdb()
 
 ROOT_URLCONF = 'gymhealthapi.urls'
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -102,7 +101,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'gymhealthdb',
         'USER': 'root',
-        'PASSWORD': 'Admin@123',
+        'PASSWORD': '060204',
         'HOST': ''  # mặc định localhost
     }
 }
