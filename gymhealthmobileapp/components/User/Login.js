@@ -1,26 +1,70 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import axiosInstance, { endpoints } from '../../configs/API'; // Import axiosInstance và endpoints từ API.js
+import { CLIENT_ID, CLIENT_SECRET } from '../../configs/API';
 
 export default function Login({ navigation }) {
-  const [isLogin, setIsLogin] = useState(true); // Quản lý trạng thái Login/Register
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [email, setEmail] = useState(''); // Thêm email cho trạng thái Register
+
+  const handleLogin = async () => {
+  try {
+    const data = {
+      grant_type: 'password',
+      username: username.trim(), // Loại bỏ khoảng trắng thừa
+      password: password.trim(),
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    };
+
+    const response = await axiosInstance.post(endpoints.login, data, {
+      headers: {
+        'Content-Type': 'application/json', // Gửi dữ liệu dạng JSON
+        'Accept': 'application/json',
+      },
+    });
+
+    if (response.data && response.data.access_token) {
+      Alert.alert('Login Successful', 'Access token received.');
+      navigation.navigate('Home'); // Điều hướng đến màn hình chính
+    } else {
+      Alert.alert('Login Failed', 'Invalid username or password.');
+    }
+  } catch (error) {
+    console.error('Error:', error.response?.data || error.message);
+
+    // Kiểm tra lỗi từ server
+    if (error.response) {
+      const status = error.response.status;
+      const errorMessage = error.response.data?.error_description || error.response.data?.error || 'An error occurred.';
+
+      switch (status) {
+        // case 400:
+        //   Alert.alert('Login Failed', 'Incorrect username or password.');
+        //   break;
+        case 401:
+          Alert.alert('Unauthorized', 'Incorrect username or password.');
+          break;
+        case 403:
+          Alert.alert('Access Denied', 'You do not have permission to access this resource.');
+          break;
+        case 500:
+          Alert.alert('Server Error', 'An internal server error occurred. Please try again later.');
+          break;
+        default:
+          Alert.alert('Login Error', errorMessage);
+          break;
+      }
+    } else {
+      // Lỗi không có phản hồi từ server (ví dụ: mất kết nối mạng)
+      Alert.alert('Network Error', 'Please check your internet connection and try again.');
+    }
+  }
+};
 
   return (
-    <View style={styles.container}>
-      {/* Logo */}
-      <Image source={require('../../assets/logo.jpg')} style={styles.logo} />
-
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        <TouchableOpacity onPress={() => setIsLogin(false)}>
-          <Text style={[styles.tabText, !isLogin && styles.activeTab]}>REGISTER</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setIsLogin(true)}>
-          <Text style={[styles.tabText, isLogin && styles.activeTab]}>LOGIN</Text>
-        </TouchableOpacity>
-      </View>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Login</Text>
 
       {/* Ô nhập liệu tên đăng nhập */}
       <TextInput
@@ -30,17 +74,6 @@ export default function Login({ navigation }) {
         value={username}
         onChangeText={setUsername}
       />
-
-      {/* Ô nhập liệu email (chỉ hiển thị khi ở trạng thái Register) */}
-      {!isLogin && (
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor="#aaa"
-          value={email}
-          onChangeText={setEmail}
-        />
-      )}
 
       {/* Ô nhập liệu mật khẩu */}
       <TextInput
@@ -52,52 +85,32 @@ export default function Login({ navigation }) {
         onChangeText={setPassword}
       />
 
-      {/* Nút Đăng nhập/Đăng ký */}
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => alert(isLogin ? 'Login pressed' : 'Register pressed')}
-      >
-        <Text style={styles.buttonText}>{isLogin ? 'LOGIN' : 'REGISTER'}</Text>
+      {/* Nút Đăng nhập */}
+      <TouchableOpacity style={styles.button} onPress={handleLogin}>
+        <Text style={styles.buttonText}>LOGIN</Text>
       </TouchableOpacity>
 
-      {/* Quên mật khẩu (chỉ hiển thị khi ở trạng thái Login) */}
-      {isLogin && (
-        <TouchableOpacity onPress={() => alert('Forgot password pressed')}>
-          <Text style={styles.forgotPassword}>Forgot password?</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+      {/* Điều hướng đến màn hình Register */}
+      <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+        <Text style={styles.switchText}>Don't have an account? Register</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',
     padding: 20,
   },
-  logo: {
-    width: 80,
-    height: 80,
-    marginBottom: 20,
-  },
-  tabs: {
-    flexDirection: 'row',
-    marginBottom: 30,
-  },
-  tabText: {
-    fontSize: 16,
+  title: {
+    fontSize: 32,
     fontWeight: 'bold',
-    color: '#aaa',
-    marginHorizontal: 10,
-  },
-  activeTab: {
-    color: '#000',
-    borderBottomWidth: 2,
-    borderBottomColor: '#000',
-    paddingBottom: 5,
+    color: '#333',
+    marginBottom: 20,
   },
   input: {
     width: '100%',
@@ -105,7 +118,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     borderRadius: 10,
     paddingHorizontal: 15,
-    marginBottom: 20,
+    marginBottom: 15,
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#ddd',
@@ -125,9 +138,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  forgotPassword: {
+  switchText: {
     fontSize: 14,
-    color: '#aaa',
+    color: '#007bff',
     marginTop: 10,
   },
 });

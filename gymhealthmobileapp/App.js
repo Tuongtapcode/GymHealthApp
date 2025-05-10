@@ -5,6 +5,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 
 // Import màn hình Login
 import Login from './components/User/Login';
+import Register from './components/User/Register';
+import Home from './components/Home/Home'; 
 
 // Tạo Stack Navigator
 const Stack = createStackNavigator();
@@ -46,6 +48,8 @@ export default function App() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
         <Stack.Screen name="Login" component={Login} />
+        <Stack.Screen name="Home" component={Home} />
+        <Stack.Screen name="Register" component={Register} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -53,11 +57,11 @@ export default function App() {
 
 const styles = StyleSheet.create({
   background: {
-    flex: 2,
+    flex: 1,
     resizeMode: 'cover', // Đảm bảo ảnh nền bao phủ toàn màn hình
   },
   container: {
-    flex: 2,
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-start', // Đẩy nội dung lên trên
     paddingTop: '35%', // Đẩy nội dung xuống 1/3 màn hình
