@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Địa chỉ cơ bản của server
-const BASE_URL = 'http://192.168.1.18:8000/'; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = 'http://192.168.233.1:8000/'; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 
 // Định nghĩa các endpoint
 export const endpoints = {
