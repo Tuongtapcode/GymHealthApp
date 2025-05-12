@@ -1,27 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Import AsyncStorage
-import { useDispatch } from 'react-redux'; // Import Redux hooks
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux';
 
-export default function Home({ navigation }) {
-  const [user, setUser] = useState(null); // Lưu thông tin người dùng trong state
+export default function Profile({ navigation, user: propUser, updateUser }) {
+  // Sử dụng prop user nếu được truyền vào, ngược lại dùng state local
+  const [user, setUser] = useState(propUser || null);
   const [loading, setLoading] = useState(true);
   const dispatch = useDispatch();
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    // Cập nhật state local khi prop thay đổi
+    if (propUser) {
+      setUser(propUser);
+      setLoading(false);
+    } else {
+      fetchUserData();
+    }
+  }, [propUser]);
+
+  const fetchUserData = async () => {
+    try {
+      const accessToken = await AsyncStorage.getItem('accessToken');
+      console.log('Access Token:', accessToken);
+
+      if (!accessToken) {
+        console.log('No access token found');
+        setLoading(false);
+        return;
+      }
+
+      // Gọi API profile để lấy thông tin người dùng
       try {
-        const accessToken = await AsyncStorage.getItem('accessToken');
-        console.log('Access Token:', accessToken);
-
-        if (!accessToken) {
-          Alert.alert('Error', 'No access token found. Please log in again.');
-          navigation.navigate('Login');
-          return;
-        }
-
-        // Gọi API profile để lấy thông tin người dùng
-        const response = await fetch('http://192.168.233.1:8000/profile/', {
+        const response = await fetch('http://192.168.1.4:8000/profile/', {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -50,28 +61,36 @@ export default function Home({ navigation }) {
         });
       } catch (error) {
         console.error('Error fetching user data:', error.message);
-        Alert.alert('Error', 'Failed to fetch user data.');
-        navigation.navigate('Login');
-      } finally {
-        setLoading(false);
+        // Nếu có lỗi khi gọi API, không làm gì thêm
       }
-    };
-
-    fetchUserData();
-  }, [dispatch, navigation]);
+    } catch (error) {
+      console.error('Error accessing AsyncStorage:', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
-      // Xóa accessToken khỏi AsyncStorage
+      // Xóa accessToken và userData khỏi AsyncStorage
       await AsyncStorage.removeItem('accessToken');
+      await AsyncStorage.removeItem('userData');
 
       // Dispatch action để cập nhật trạng thái logout
       dispatch({ type: 'logout' });
 
+      // Cập nhật trạng thái user trong TabNavigator
+      if (updateUser) {
+        updateUser(null);
+      }
+
       Alert.alert('Logout Successful', 'You have been logged out.');
-      navigation.navigate('Login'); // Điều hướng về màn hình Login
+      
+      // KHÔNG cần điều hướng đến bất kỳ màn hình nào
+      // TabNavigator sẽ tự động hiển thị các tab đăng nhập/đăng ký
     } catch (error) {
       console.error('Logout error:', error.message);
+      Alert.alert('Error', 'Failed to logout. Please try again.');
     }
   };
 
@@ -85,7 +104,8 @@ export default function Home({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.text}>Welcome, {user ? user.username : 'Guest'}!</Text>
+      <Text style={styles.title}>Profile</Text>
+      <Text style={styles.text}>Username: {user ? user.username : 'Guest'}</Text>
       <Text style={styles.text}>Email: {user ? user.email : 'N/A'}</Text>
       <TouchableOpacity style={styles.button} onPress={handleLogout}>
         <Text style={styles.buttonText}>Logout</Text>
@@ -100,18 +120,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',
+    padding: 20,
   },
-  text: {
-    fontSize: 24,
+  title: {
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 20,
+    marginBottom: 30,
+  },
+  text: {
+    fontSize: 18,
+    color: '#333',
+    marginBottom: 15,
   },
   button: {
-    backgroundColor: '#007bff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 5,
+    backgroundColor: '#333',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    marginTop: 20,
   },
   buttonText: {
     color: '#fff',

@@ -1,28 +1,28 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
-import axiosInstance, { endpoints } from '../../configs/API'; // Import axiosInstance và endpoints từ API.js
-import { CLIENT_ID, CLIENT_SECRET } from '../../configs/API'; // Import CLIENT_ID và CLIENT_SECRET
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Import AsyncStorage
-import { useDispatch } from 'react-redux'; // Import Redux để dispatch action
+import axiosInstance, { endpoints } from '../../configs/API';
+import { CLIENT_ID, CLIENT_SECRET } from '../../configs/API';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux';
 
-export default function Login({ navigation }) {
+export default function Login({ navigation, updateUser }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const dispatch = useDispatch(); // Sử dụng dispatch để cập nhật Redux
+  const dispatch = useDispatch();
 
   const handleLogin = async () => {
     try {
       const data = {
-        grant_type: 'password', // OAuth2 grant type
-        username: username.trim(), // Loại bỏ khoảng trắng thừa
+        grant_type: 'password',
+        username: username.trim(),
         password: password.trim(),
-        client_id: CLIENT_ID, // ID của ứng dụng
-        client_secret: CLIENT_SECRET, // Secret của ứng dụng
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
       };
 
       const response = await axiosInstance.post(endpoints.login, data, {
         headers: {
-          'Content-Type': 'application/json', // Gửi dữ liệu dạng JSON
+          'Content-Type': 'application/json',
           Accept: 'application/json',
         },
       });
@@ -30,15 +30,23 @@ export default function Login({ navigation }) {
       if (response.data && response.data.access_token) {
         // Lưu accessToken vào AsyncStorage
         await AsyncStorage.setItem('accessToken', response.data.access_token);
+        
+        // Lưu thông tin người dùng vào AsyncStorage
+        const userData = { token: response.data.access_token, username: username };
+        await AsyncStorage.setItem('userData', JSON.stringify(userData));
 
-        // Dispatch action để cập nhật trạng thái login
+        // Dispatch action để cập nhật trạng thái login trong Redux
         dispatch({
           type: 'login',
-          payload: {}, // Truyền payload mặc định nếu không có dữ liệu
+          payload: userData,
         });
+        
+        // Cập nhật trạng thái user trong TabNavigator
+        updateUser(userData);
 
         Alert.alert('Login Successful', 'You have successfully logged in.');
-        navigation.navigate('Profile'); // Điều hướng đến màn hình Home
+        
+        // KHÔNG cần điều hướng đến Profile - TabNavigator sẽ tự động hiển thị các tab chính
       } else {
         Alert.alert('Login Failed', 'Invalid username or password.');
       }
@@ -103,7 +111,7 @@ export default function Login({ navigation }) {
       </TouchableOpacity>
 
       {/* Điều hướng đến màn hình Register */}
-      <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+      <TouchableOpacity onPress={() => navigation.navigate('register')}>
         <Text style={styles.switchText}>Don't have an account? Register</Text>
       </TouchableOpacity>
     </ScrollView>
