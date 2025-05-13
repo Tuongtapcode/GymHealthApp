@@ -32,7 +32,7 @@ export default function Login({ navigation, updateUser }) {
         await AsyncStorage.setItem('accessToken', response.data.access_token);
         
         // Lưu thông tin người dùng vào AsyncStorage
-        const userData = { token: response.data.access_token, username: username };
+        const userData = { token: response.data.access_token, username: username};
         await AsyncStorage.setItem('userData', JSON.stringify(userData));
 
         // Dispatch action để cập nhật trạng thái login trong Redux

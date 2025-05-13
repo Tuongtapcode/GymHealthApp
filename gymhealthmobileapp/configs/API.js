@@ -1,12 +1,16 @@
 import axios from 'axios';
 
 // Địa chỉ cơ bản của server
-const BASE_URL = 'http://192.168.1.4:8000/'; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = 'http://192.168.1.5:8000/'; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 
 // Định nghĩa các endpoint
 export const endpoints = {
   login: '/o/token/',
-  register: '/register/'
+  register: '/register/',
+  subscription: '/subscription/',
+  workoutSessions: '/workout-sessions/',
+  trainingProgress: '/training-progress/',
+  packages: '/packages/',
 };
 
 export const CLIENT_ID = 'AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh';

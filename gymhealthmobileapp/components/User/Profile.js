@@ -32,7 +32,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
 
       // Gọi API profile để lấy thông tin người dùng
       try {
-        const response = await fetch('http://192.168.1.4:8000/profile/', {
+        const response = await fetch('http://192.168.1.5:8000/profile/', {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${accessToken}`,
