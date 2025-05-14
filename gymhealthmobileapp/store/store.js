@@ -20,7 +20,7 @@ const initializeStore = async (navigation) => {
     if (accessToken) {
       try {
         // Gọi API để lấy thông tin người dùng
-        const response = await authAPI(accessToken).get(endpoints.profile);
+        const response = await authAPI(accessToken).get(endpoints.currentUser);
 
         if (response.status >= 200 && response.status < 300) {
           const userData = response.data;
