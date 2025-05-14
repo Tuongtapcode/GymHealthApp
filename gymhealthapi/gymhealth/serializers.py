@@ -123,14 +123,14 @@ class MemberProfileSerializer(ModelSerializer):
     is_membership_valid = BooleanField(read_only=True)
     username = CharField(source='user.username', read_only=True)
     email = CharField(source='user.email', read_only=True)
+    avatar = CharField(source='user.avatar.url', read_only=True)
 
     class Meta:
         model = MemberProfile
-        fields = ('id', 'username', 'email', 'membership_start_date', 'membership_end_date',
+        fields = ('id', 'username', 'email', 'avatar','membership_start_date', 'membership_end_date',
                   'is_active', 'emergency_contact_name', 'emergency_contact_phone',
                   'is_membership_valid')
         read_only_fields = ['id', 'user', 'membership_start_date']
-
 
 class TrainerProfileSerializer(ModelSerializer):
     username = CharField(source='user.username', read_only=True)

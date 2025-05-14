@@ -42,23 +42,22 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
 
         console.log('Response Status:', response.status);
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('API Error:', errorText);
+        if (response.status >= 200 && response.status < 300) {
+          const userData = response.data;
+          console.log('User Data:', userData);
+
+          // Lưu thông tin người dùng vào state
+          setUser(userData);
+
+          // Dispatch action để cập nhật Redux state
+          dispatch({
+            type: 'login',
+            payload: userData,
+          });
+        } else {
+          console.error('API Error:', response.statusText);
           throw new Error('Failed to fetch user profile');
         }
-
-        const userData = await response.json();
-        console.log('User Data:', userData);
-
-        // Lưu thông tin người dùng vào state
-        setUser(userData);
-
-        // Dispatch action để cập nhật Redux state
-        dispatch({
-          type: 'login',
-          payload: userData,
-        });
       } catch (error) {
         console.error('Error fetching user data:', error.message);
         // Nếu có lỗi khi gọi API, không làm gì thêm
@@ -107,8 +106,18 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
       <Text style={styles.title}>Profile</Text>
       <Text style={styles.text}>Username: {user ? user.username : 'Guest'}</Text>
       <Text style={styles.text}>Email: {user ? user.email : 'N/A'}</Text>
+
+      {/* Nút Logout */}
       <TouchableOpacity style={styles.button} onPress={handleLogout}>
         <Text style={styles.buttonText}>Logout</Text>
+      </TouchableOpacity>
+
+      {/* Nút chuyển đến Home */}
+      <TouchableOpacity
+        style={[styles.button, { backgroundColor: '#28a745', marginTop: 10 }]}
+        onPress={() => navigation.navigate('Home')}
+      >
+        <Text style={styles.buttonText}>Go to Home</Text>
       </TouchableOpacity>
     </View>
   );

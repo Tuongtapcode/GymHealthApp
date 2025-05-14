@@ -26,7 +26,6 @@ SECRET_KEY = 'django-insecure-(1l%j4%y4fh85m2u%(!!dzn=)d1=pf#y$v%f57iq=pv#x*-9x+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
 
 # Application definition
 CKEDITOR_UPLOAD_PATH = "images/"
@@ -43,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_yasg',
     'oauth2_provider',
+    'corsheaders',
 ]
 
 REST_FRAMEWORK = {
@@ -68,13 +68,13 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 AUTH_USER_MODEL = 'gymhealth.User'
 
 import pymysql
-
+ALLOWED_HOSTS=['192.168.1.53']
 pymysql.install_as_MySQLdb()
-
 ROOT_URLCONF = 'gymhealthapi.urls'
 TEMPLATES = [
     {
@@ -149,5 +149,7 @@ OAUTH2_PROVIDER = {
     'OAUTH2_BACKEND_CLASS': 'oauth2_provider.oauth2_backends.JSONOAuthLibCore',
 }
 
-CLIENT_ID = 'AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh'
-CLIENT_SECRET = '89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o'
+CLIENT_ID = 'xFbPBC3vOcOnf5e4dhcVcroXxeqed8Dnpb41PtPY'
+CLIENT_SECRET = 'aJhbfraNTsaTdsr8RqbWmsPM177OGRzlpOrxoCNXqlP9aPPAYFZikipa9rotIp4Ql9QlysSKu8HEHh0ewQC84JspFZA8BubRdGen5NSJHiZNMjqz9XLpixW8L16pCMpr'
+
+
