@@ -461,9 +461,9 @@ const Home = ({ navigation }) => {
         <Text style={styles.packageBenefits}>{userPackage.benefits}</Text>
         <TouchableOpacity
           style={styles.buttonOutline}
-          onPress={() => navigation.navigate("SubscriptionDetail")}
+          onPress={() => navigation.navigate("packages")}
         >
-          <Text style={styles.buttonOutlineText}>Xem chi tiết</Text>
+          <Text style={styles.buttonOutlineText}>Xem thêm</Text>
         </TouchableOpacity>
       </View>
     );

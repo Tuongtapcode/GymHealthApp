@@ -7,6 +7,8 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
+  ScrollView,
+  SafeAreaView,
 } from "react-native";
 import {
   Searchbar,
@@ -20,43 +22,162 @@ import HTML from "react-native-render-html";
 import { useWindowDimensions } from "react-native";
 import axiosInstance, { endpoints } from "../../configs/API";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-const Packages = () => {
+import PackageDetail from "./PackageDetail";
+
+const Packages = ({ navigation }) => {
   const [packages, setPackages] = useState([]);
   const [filteredPackages, setFilteredPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState(null);
   const { width } = useWindowDimensions();
-    const [error, setError] = useState(null);
+  const [error, setError] = useState(null);
+  
+  // State cho modal chi tiết
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [selectedPackageId, setSelectedPackageId] = useState(null);
+  
+  // State cho thông tin gói tập hiện tại của user
+  const [userPackage, setUserPackage] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const [subscriptionError, setSubscriptionError] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  // Kiểm tra đăng nhập và lấy thông tin gói tập hiện tại
+  useEffect(() => {
+    checkLoginStatus();
+  }, []);
+  
   // Fetch packages data
   useEffect(() => {
     fetchPackages();
   }, []);
 
-  const fetchPackages = async () => {
+  // Kiểm tra trạng thái đăng nhập
+  const checkLoginStatus = async () => {
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      if (accessToken) {
+        setIsLoggedIn(true);
+        fetchSubscription();
+      } else {
+        setIsLoggedIn(false);
+        setSubscriptionLoading(false);
+      }
+    } catch (error) {
+      console.error("Error checking login status:", error);
+      setIsLoggedIn(false);
+      setSubscriptionLoading(false);
+    }
+  };
+
+  // Lấy thông tin gói tập từ API
+  const fetchSubscription = async () => {
+    try {
+      setSubscriptionLoading(true);
+      setSubscriptionError(null);
+
+      // Lấy access token từ AsyncStorage
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      console.log("Access Token for subscription:", accessToken);
+
+      if (!accessToken) {
+        console.log("No access token found");
+        throw new Error("Không tìm thấy token đăng nhập");
+      }
+
+      console.log("Requesting URL:", endpoints.subscription + "my/");
+      const response = await axiosInstance.get(endpoints.subscription + "my/", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      console.log("Response data:", response.data);
+      console.log("Subscription API response:", response.status);
+
+      // Lọc ra gói đang hoạt động (active) và lấy gói mới nhất
+      const activeSubscriptions = response.data.results.filter(
+        (sub) => sub.status === "active"
+      );
+
+      if (activeSubscriptions.length > 0) {
+        // Sắp xếp theo ngày bắt đầu để lấy gói mới nhất
+        const latestSubscription = activeSubscriptions.sort(
+          (a, b) => new Date(b.start_date) - new Date(a.start_date)
+        )[0];
+
+        // Chuyển đổi dữ liệu để phù hợp với định dạng cũ
+        const formattedPackage = {
+          id: latestSubscription.id.toString(),
+          name: latestSubscription.package_name,
+          price: `${parseFloat(
+            latestSubscription.discounted_price
+          ).toLocaleString("vi-VN")}đ`,
+          benefits: latestSubscription.package.benefits
+            .map((b) => b.name)
+            .join(", "),
+          sessions: latestSubscription.remaining_pt_sessions,
+          duration: `${latestSubscription.package.package_type.duration_months} tháng`,
+          endDate: latestSubscription.end_date,
+          startDate: latestSubscription.start_date,
+          remainingDays: latestSubscription.remaining_days,
+          // Lưu trữ dữ liệu gốc để sử dụng nếu cần
+          originalData: latestSubscription,
+        };
+
+        setUserPackage(formattedPackage);
+      } else {
+        // Không có gói đang hoạt động
+        setUserPackage(null);
+      }
+
+      setSubscriptionLoading(false);
+    } catch (error) {
+      console.error("Error fetching subscription:", error);
+      setSubscriptionError("Không thể tải dữ liệu gói tập");
+      setSubscriptionLoading(false);
+    }
+  };
+
+  const fetchPackages = async (params = {}) => {
     try {
       setLoading(true);
       setError(null);
 
-    
-
+      // Thêm các filter vào params nếu có
+      const requestParams = { ...params };
+      
+      // Thêm param active=true để chỉ lấy gói đang hoạt động
+      requestParams.active = true;
+      
+      // Thêm package_type vào params nếu có lọc theo loại
+      if (selectedType !== null) {
+        requestParams.package_type = selectedType;
+      }
+      
+      // Thêm tìm kiếm theo tên nếu có
+      if (searchQuery.trim() !== "") {
+        requestParams.search = searchQuery.trim();
+      }
 
       console.log(
         "Requesting packages URL:",
-        endpoints.packages // Đảm bảo bạn có endpoint này trong file cấu hình
+        endpoints.packages,
+        "with params:",
+        requestParams
       );
       
-    const response = await axiosInstance.get(endpoints.packages);
+      const response = await axiosInstance.get(endpoints.packages, {
+        params: requestParams
+      });
 
       console.log("Packages API response status:", response.status);
       console.log("Response data:", response.data);
 
       if (response.data && Array.isArray(response.data)) {
-        // Lọc chỉ lấy các gói active nếu cần
-        const activePackages = response.data.filter(pkg => pkg.active);
-        
-        // Thêm xử lý dữ liệu nếu cần
-        const formattedPackages = activePackages.map(pkg => {
+        // Định dạng dữ liệu nhận được
+        const formattedPackages = response.data.map(pkg => {
           return {
             id: pkg.id,
             price_per_month: pkg.price_per_month,
@@ -70,15 +191,13 @@ const Packages = () => {
             pt_sessions: pkg.pt_sessions,
             package_type: pkg.package_type,
             benefits: pkg.benefits,
-            // Thêm các trường khác nếu cần
-            originalData: pkg, // Lưu dữ liệu gốc để sử dụng nếu cần
+            originalData: pkg // Lưu dữ liệu gốc để sử dụng nếu cần
           };
         });
 
         setPackages(formattedPackages);
         setFilteredPackages(formattedPackages);
       } else {
-        // Không có dữ liệu hoặc dữ liệu không đúng định dạng
         console.log("No packages data or invalid data format");
         setPackages([]);
         setFilteredPackages([]);
@@ -88,77 +207,79 @@ const Packages = () => {
     } catch (error) {
       console.error('Error fetching packages:', error);
       
-      // Hiển thị thông báo lỗi cụ thể
       if (error.response) {
-        // Lỗi từ response của server
         console.log("Server error response:", error.response.data);
         setError(`Lỗi từ server: ${error.response.status}`);
       } else if (error.request) {
-        // Không nhận được response
         console.log("No response received:", error.request);
         setError("Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.");
       } else {
-        // Lỗi trong quá trình thiết lập request
         setError(`Lỗi: ${error.message}`);
       }
       
       setLoading(false);
       
-      
-      
-      console.log("Loading demo data as fallback");
-      setPackages(demoData);
-      setFilteredPackages(demoData);
+      // Nếu có demoData đã được định nghĩa, sử dụng làm fallback
+      if (typeof demoData !== 'undefined') {
+        console.log("Loading demo data as fallback");
+        setPackages(demoData);
+        setFilteredPackages(demoData);
+      }
     }
   };
+
   // Handle search
   const onChangeSearch = (query) => {
     setSearchQuery(query);
-
+    
+    // Gọi API mới với tham số tìm kiếm
     if (query.trim() === "") {
-      // If search is empty, show all or filtered by type
-      filterByType(selectedType);
+      // Nếu xóa tìm kiếm, chỉ áp dụng bộ lọc theo loại
+      fetchPackages(selectedType !== null ? { package_type: selectedType } : {});
     } else {
-      // Filter by search term and possibly type
-      const filtered = packages.filter(
-        (pkg) =>
-          pkg.name.toLowerCase().includes(query.toLowerCase()) &&
-          (selectedType === null || pkg.package_type === selectedType)
-      );
-      setFilteredPackages(filtered);
+      // Áp dụng cả tìm kiếm và lọc theo loại nếu có
+      const params = { search: query.trim() };
+      if (selectedType !== null) {
+        params.package_type = selectedType;
+      }
+      fetchPackages(params);
     }
   };
 
   // Filter by package type
   const filterByType = (type) => {
     setSelectedType(type);
-
-    if (type === null) {
-      // Show all packages, possibly filtered by search
-      if (searchQuery.trim() === "") {
-        setFilteredPackages(packages);
-      } else {
-        const filtered = packages.filter((pkg) =>
-          pkg.name.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-        setFilteredPackages(filtered);
-      }
-    } else {
-      // Filter by type and possibly search
-      const filtered = packages.filter(
-        (pkg) =>
-          pkg.package_type === type &&
-          (searchQuery.trim() === "" ||
-            pkg.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-      setFilteredPackages(filtered);
+    
+    // Gọi API với bộ lọc mới
+    const params = {};
+    
+    if (type !== null) {
+      params.package_type = type;
     }
+    
+    if (searchQuery.trim() !== "") {
+      params.search = searchQuery.trim();
+    }
+    
+    fetchPackages(params);
   };
 
-  // Handle registration - to be implemented later
+  // Handle registration
   const handleRegister = (packageId) => {
     console.log(`Register for package ${packageId}`);
     // Implement registration logic here
+  };
+  
+  // Handle view details - Mở modal chi tiết
+  const handleViewDetails = (packageId) => {
+    console.log(`View details for package ${packageId}`);
+    setSelectedPackageId(packageId);
+    setDetailModalVisible(true);
+  };
+  
+  // Đóng modal chi tiết
+  const hideDetailModal = () => {
+    setDetailModalVisible(false);
   };
 
   // Get package type label
@@ -187,7 +308,6 @@ const Packages = () => {
 
   // Render package item
   const renderPackageItem = ({ item }) => (
-    console.log(`https://res.cloudinary.com/duqln52pu/${item.image}`),
     <Card style={styles.card} elevation={3}>
       <Card.Cover
         source={{
@@ -205,7 +325,7 @@ const Packages = () => {
         <PaperText variant="titleLarge" style={styles.title}>
           {item.name}
         </PaperText>
-        <HTML source={{ html: item.description }} contentWidth={width - 60} />
+        {/* <HTML source={{ html: item.description }} contentWidth={width - 60} /> */}
 
         <View style={styles.detailsRow}>
           <PaperText variant="bodySmall">Giá mỗi tháng:</PaperText>
@@ -230,10 +350,10 @@ const Packages = () => {
       <Card.Actions style={styles.cardActions}>
         <Button
           mode="outlined"
-          style={[styles.btn, { marginLeft: 10 }]} // Thêm khoảng cách giữa hai nút
-          onPress={() => handleViewDetails(item.id)} // Hàm xử lý khi nhấn "Xem chi tiết"
+          style={[styles.btn, { marginLeft: 10 }]}
+          onPress={() => handleViewDetails(item.id)}
         >
-          Xem chi tiết
+          Chi tiết
         </Button>
         <Button
           mode="contained"
@@ -292,46 +412,182 @@ const Packages = () => {
     </View>
   );
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <PaperText variant="headlineMedium" style={styles.headerTitle}>
-          Gói tập
-        </PaperText>
+  // Component hiển thị gói tập hiện tại của người dùng
+  const CurrentPackage = () => {
+    if (subscriptionLoading) {
+      return (
+        <View style={[styles.packageCard, styles.centerContent]}>
+          <ActivityIndicator size="large" color="#1a73e8" />
+          <Text style={{ marginTop: 10 }}>Đang tải thông tin gói tập...</Text>
+        </View>
+      );
+    }
+
+    if (subscriptionError) {
+      return (
+        <View style={[styles.packageCard, styles.centerContent]}>
+          <Text style={styles.errorText}>{subscriptionError}</Text>
+          <TouchableOpacity
+            style={[styles.buttonPrimary, { marginTop: 12 }]}
+            onPress={fetchSubscription}
+          >
+            <Text style={styles.buttonPrimaryText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!userPackage) {
+      return (
+        <View style={[styles.packageCard, styles.centerContent]}>
+          <Text style={{ fontSize: 16, marginBottom: 12 }}>
+            Bạn chưa đăng ký gói tập nào
+          </Text>
+          <TouchableOpacity
+            style={styles.buttonPrimary}
+            onPress={() => {}} // Scroll xuống các gói tập bên dưới
+          >
+            <Text style={styles.buttonPrimaryText}>Đăng ký ngay</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.packageCard}>
+        <Text style={styles.cardTitle}>Gói tập hiện tại</Text>
+        <Text style={styles.packageName}>{userPackage.name}</Text>
+        <View style={styles.packageDetails}>
+          <View style={styles.packageDetail}>
+            <Text style={styles.detailLabel}>Giá:</Text>
+            <Text style={styles.detailValue}>{userPackage.price}</Text>
+          </View>
+          <View style={styles.packageDetail}>
+            <Text style={styles.detailLabel}>Thời hạn:</Text>
+            <Text style={styles.detailValue}>{userPackage.duration}</Text>
+          </View>
+          <View style={styles.packageDetail}>
+            <Text style={styles.detailLabel}>Buổi với PT còn lại:</Text>
+            <Text style={styles.detailValue}>{userPackage.sessions} buổi</Text>
+          </View>
+          <View style={styles.packageDetail}>
+            <Text style={styles.detailLabel}>Còn lại:</Text>
+            <Text style={styles.detailValue}>
+              {userPackage.remainingDays} ngày
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.packageBenefits}>{userPackage.benefits}</Text>
+        <TouchableOpacity
+          style={styles.buttonOutline}
+          onPress={() => handleViewDetails(userPackage.originalData?.package?.id)}
+        >
+          <Text style={styles.buttonOutlineText}>Xem chi tiết</Text>
+        </TouchableOpacity>
       </View>
+    );
+  };
 
-      <Searchbar
-        placeholder="Tìm kiếm gói tập..."
-        onChangeText={onChangeSearch}
-        value={searchQuery}
-        style={styles.searchBar}
-      />
-
-      {renderFilterChips()}
-
-      {loading ? (
+  // Render package content differently based on loading state
+  const renderPackageContent = () => {
+    if (loading) {
+      return (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0000ff" />
           <PaperText variant="bodyMedium" style={styles.loadingText}>
             Đang tải gói tập...
           </PaperText>
         </View>
-      ) : filteredPackages.length === 0 ? (
+      );
+    }
+    
+    if (error) {
+      return (
+        <View style={styles.errorContainer}>
+          <PaperText variant="bodyLarge" style={styles.errorText}>
+            {error}
+          </PaperText>
+          <Button 
+            mode="contained" 
+            onPress={() => fetchPackages()} 
+            style={styles.retryButton}
+          >
+            Thử lại
+          </Button>
+        </View>
+      );
+    }
+    
+    if (filteredPackages.length === 0) {
+      return (
         <View style={styles.emptyContainer}>
           <PaperText variant="bodyLarge" style={styles.emptyText}>
             Không tìm thấy gói tập phù hợp
           </PaperText>
         </View>
-      ) : (
-        <FlatList
-          data={filteredPackages}
-          renderItem={renderPackageItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContainer}
-          showsVerticalScrollIndicator={false}
+      );
+    }
+    
+    return (
+      <FlatList
+        data={filteredPackages}
+        renderItem={renderPackageItem}
+        keyExtractor={(item) => item.id.toString()}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled={true}
+      />
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={true}
+      >
+        <View style={styles.header}>
+          <PaperText variant="headlineMedium" style={styles.headerTitle}>
+            Gói tập
+          </PaperText>
+        </View>
+
+        {/* Hiển thị gói tập hiện tại nếu người dùng đã đăng nhập */}
+        {isLoggedIn && <CurrentPackage />}
+
+        {/* Phần tiêu đề của danh sách gói tập nếu đã có gói tập hiện tại */}
+        {isLoggedIn && userPackage && (
+          <View style={styles.sectionHeader}>
+            <PaperText variant="titleMedium" style={styles.sectionTitle}>
+              Các gói tập khác
+            </PaperText>
+          </View>
+        )}
+
+        <Searchbar
+          placeholder="Tìm kiếm gói tập..."
+          onChangeText={onChangeSearch}
+          value={searchQuery}
+          style={styles.searchBar}
         />
-      )}
-    </View>
+
+        {renderFilterChips()}
+
+        {/* Khu vực hiển thị gói tập */}
+        <View style={styles.packagesContainer}>
+          {renderPackageContent()}
+        </View>
+      </ScrollView>
+      
+      {/* Modal chi tiết gói tập */}
+      <PackageDetail
+        visible={detailModalVisible}
+        packageId={selectedPackageId}
+        onDismiss={hideDetailModal}
+        onRegister={handleRegister}
+      />
+    </SafeAreaView>
   );
 };
 
@@ -339,7 +595,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
     padding: 10,
+    paddingBottom: 20,
   },
   header: {
     marginVertical: 10,
@@ -366,8 +628,12 @@ const styles = StyleSheet.create({
   selectedChip: {
     backgroundColor: "#e0e0ff",
   },
+  packagesContainer: {
+    flex: 1,
+    minHeight: 200, // Ensure there's space for content even when empty
+  },
   listContainer: {
-    paddingBottom: 20, // Khoảng cách dưới cùng
+    paddingBottom: 20,
     paddingHorizontal: 5,
   },
   card: {
@@ -429,17 +695,134 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    minHeight: 200,
   },
   loadingText: {
     marginTop: 10,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    minHeight: 200,
+  },
+  errorText: {
+    color: "red",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  retryButton: {
+    borderRadius: 25,
+    paddingHorizontal: 30,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    minHeight: 200,
   },
   emptyText: {
     color: "#666",
+  },
+  
+  /* Thêm styles cho phần hiển thị gói tập hiện tại */
+  packageCard: {
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 16,
+    marginVertical: 12,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  centerContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 10,
+  },
+  packageName: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#1a73e8",
+    marginBottom: 12,
+  },
+  packageDetails: {
+    marginBottom: 15,
+  },
+  packageDetail: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  detailLabel: {
+    fontSize: 16,
+    color: "#666",
+  },
+  detailValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+  },
+  packageBenefits: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 15,
+    fontStyle: "italic",
+  },
+  buttonPrimary: {
+    backgroundColor: "#1a73e8",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buttonPrimaryText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  buttonOutline: {
+    borderWidth: 1,
+    borderColor: "#1a73e8",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+  buttonOutlineText: {
+    color: "#1a73e8",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  sectionHeader: {
+    marginTop: 10,
+    marginBottom: 5,
+    paddingHorizontal: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+  },
+  errorText: {
+    color: "#e53935",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 10,
   },
 });
 

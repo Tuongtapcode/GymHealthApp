@@ -14,8 +14,9 @@ import Register from './components/User/Register';
 import Home from './components/Home/Home';
 import Profile from './components/User/Profile';
 import Packages from './components/Home/Packages'; // Giả sử bạn có component này
-import Sessions from './components/Home/Sessions';
+import Schedule from './components/Home/Schedule'; // Giả sử bạn có component này
 import Progress from './components/Home/Progress';
+import { PaperProvider } from 'react-native-paper';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -146,8 +147,8 @@ const TabNavigator = () => {
             }}
           />
           <Tab.Screen 
-            name="sessions" 
-            component={Sessions} 
+            name="schedule" 
+            component={Schedule} 
             options={{
               title: 'Lịch tập',
               tabBarIcon: ({color, size}) => <Icon size={size} color={color} name="calendar-month" />
@@ -207,12 +208,14 @@ function WelcomeScreen({ navigation }) {
 export default function App() {
   return (
     <Provider store={store}>
-      <NavigationContainer>
+     <PaperProvider>
+       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="MainTabs" component={TabNavigator} />
         </Stack.Navigator>
       </NavigationContainer>
+     </PaperProvider>
     </Provider>
   );
 }
