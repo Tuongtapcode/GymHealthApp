@@ -52,10 +52,11 @@ const Home = ({ navigation }) => {
   // Lấy thông tin người dùng từ Redux store
   const userFromRedux = useSelector((state) => state.user);
 
-  // Lấy thông tin gói tập từ API// Lấy thông tin gói tập từ API
-  const fetchSubscription = async () => {
+  // Thay thế hàm fetchActiveSubscription hiện tại bằng đoạn code này
+  const fetchActiveSubscription = async () => {
     try {
       setLoading(true);
+      setError(null); // Reset any previous errors
 
       // Lấy access token từ AsyncStorage
       const accessToken = await AsyncStorage.getItem("accessToken");
@@ -66,26 +67,50 @@ const Home = ({ navigation }) => {
         throw new Error("Không tìm thấy token đăng nhập");
       }
 
-      console.log("Requesting URL:", endpoints.subscription + "my/");
-      const response = await axiosInstance.get(endpoints.subscription + "my/", {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      // Sử dụng axios trực tiếp với URL đầy đủ
+      // Sử dụng endpoint subscription/active/ để lấy gói đang hoạt động
+      console.log("Requesting URL:", endpoints.subscription + "active/");
+      const response = await axiosInstance.get(
+        endpoints.subscription + "active/",
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
 
       console.log("Response data:", response.data);
       console.log("Subscription API response:", response.status);
 
-      // Lọc ra gói đang hoạt động (active) và lấy gói mới nhất
-      const activeSubscriptions = response.data.results.filter(
-        (sub) => sub.status === "active"
-      );
+      // Kiểm tra xem response.data có tồn tại và có id không
+      if (response.data && response.data.id) {
+        // Đây là một gói tập đang hoạt động
+        const subscription = response.data;
 
-      if (activeSubscriptions.length > 0) {
-        // Sắp xếp theo ngày bắt đầu để lấy gói mới nhất
-        const latestSubscription = activeSubscriptions.sort(
+        // Chuyển đổi dữ liệu để phù hợp với định dạng cũ
+        const formattedPackage = {
+          id: subscription.id.toString(),
+          name: subscription.package_name,
+          price: `${parseFloat(subscription.discounted_price).toLocaleString(
+            "vi-VN"
+          )}đ`,
+          benefits: subscription.package.benefits.map((b) => b.name).join(", "),
+          sessions: subscription.remaining_pt_sessions,
+          duration: `${subscription.package.package_type.duration_months} tháng`,
+          endDate: subscription.end_date,
+          startDate: subscription.start_date,
+          remainingDays: subscription.remaining_days,
+          // Lưu trữ dữ liệu gốc để sử dụng nếu cần
+          originalData: subscription,
+        };
+
+        setUserPackage(formattedPackage);
+      } else if (
+        response.data &&
+        response.data.results &&
+        response.data.results.length > 0
+      ) {
+        // Trường hợp API trả về dạng array trong trường results
+        const latestSubscription = response.data.results.sort(
           (a, b) => new Date(b.start_date) - new Date(a.start_date)
         )[0];
 
@@ -104,6 +129,7 @@ const Home = ({ navigation }) => {
           endDate: latestSubscription.end_date,
           startDate: latestSubscription.start_date,
           remainingDays: latestSubscription.remaining_days,
+          
           // Lưu trữ dữ liệu gốc để sử dụng nếu cần
           originalData: latestSubscription,
         };
@@ -119,9 +145,9 @@ const Home = ({ navigation }) => {
       console.error("Error fetching subscription:", error);
       setError("Không thể tải dữ liệu gói tập");
       setLoading(false);
+      setUserPackage(null); // Reset user package on error
     }
   };
-
   // Hàm chuyển đổi status sang tiếng Việt
   const translateStatus = (status) => {
     const statusMap = {
@@ -385,7 +411,7 @@ const Home = ({ navigation }) => {
     };
 
     fetchUserData();
-    fetchSubscription();
+    fetchActiveSubscription();
     fetchUpcomingSchedules(); // Thêm dòng này để gọi API lịch tập
     fetchTrainingProgress(); // Thêm dòng này để gọi API thông tin sức khỏe
   }, [userFromRedux]);
@@ -410,7 +436,7 @@ const Home = ({ navigation }) => {
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity
             style={[styles.buttonPrimary, { marginTop: 12 }]}
-            onPress={fetchSubscription}
+            onPress={fetchActiveSubscription}
           >
             <Text style={styles.buttonPrimaryText}>Thử lại</Text>
           </TouchableOpacity>
