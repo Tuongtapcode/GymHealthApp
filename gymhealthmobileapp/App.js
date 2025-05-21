@@ -20,11 +20,12 @@ import Register from "./components/User/Register";
 import Home from "./components/Home/Home";
 import Profile from "./components/User/Profile";
 import Schedule from "./components/Home/Schedule";
-import Progress from "./components/Home/Progress";
+import Progress from "./components/Home/Progress/Progress";
 import { PaperProvider } from "react-native-paper";
 
 // Import PackagesNavigator thay vì import trực tiếp Packages
 import PackagesNavigator from "./components/Home/Packages/PackagesNavigator";
+import ProgressNavigator from "./components/Home/Progress/ProgressNavigator";
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -176,7 +177,7 @@ const TabNavigator = () => {
           />
           <Tab.Screen
             name="progress"
-            component={Progress}
+            component={ProgressNavigator}
             options={{
               title: "Tiến độ",
               tabBarIcon: ({ color, size }) => (

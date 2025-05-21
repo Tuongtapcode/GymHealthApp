@@ -2,7 +2,7 @@ import { current } from "@reduxjs/toolkit";
 import axios from "axios";
 
 // Địa chỉ cơ bản của server
-const BASE_URL = "http://192.168.1.3:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = "http://192.168.1.2:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 
 // Định nghĩa các endpoint
 export const endpoints = {

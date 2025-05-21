@@ -129,7 +129,7 @@ const Home = ({ navigation }) => {
           endDate: latestSubscription.end_date,
           startDate: latestSubscription.start_date,
           remainingDays: latestSubscription.remaining_days,
-          
+
           // Lưu trữ dữ liệu gốc để sử dụng nếu cần
           originalData: latestSubscription,
         };
@@ -971,7 +971,7 @@ const Home = ({ navigation }) => {
 
         <TouchableOpacity
           style={[styles.buttonOutline, { marginTop: 16 }]}
-          onPress={() => navigation.navigate("Progress")}
+          onPress={() => navigation.navigate("progress")}
         >
           <Text style={styles.buttonOutlineText}>Xem chi tiết</Text>
         </TouchableOpacity>
