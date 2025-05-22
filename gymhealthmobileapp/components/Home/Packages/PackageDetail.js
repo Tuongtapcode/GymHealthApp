@@ -13,7 +13,7 @@ import {
 } from "react-native-paper";
 import HTML from "react-native-render-html";
 import { useWindowDimensions } from "react-native";
-import axiosInstance, { endpoints } from "../../configs/API";
+import axiosInstance, { endpoints } from "../../../configs/API";
 
 const PackageDetail = ({ visible, packageId, onDismiss, onRegister }) => {
   const [packageDetail, setPackageDetail] = useState(null);
