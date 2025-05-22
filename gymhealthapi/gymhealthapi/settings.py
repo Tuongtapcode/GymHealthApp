@@ -73,7 +73,7 @@ MIDDLEWARE = [
 AUTH_USER_MODEL = 'gymhealth.User'
 
 import pymysql
-ALLOWED_HOSTS=['192.168.1.53']
+ALLOWED_HOSTS=['192.168.1.11']
 pymysql.install_as_MySQLdb()
 ROOT_URLCONF = 'gymhealthapi.urls'
 TEMPLATES = [

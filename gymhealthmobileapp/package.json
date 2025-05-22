@@ -25,6 +25,7 @@
     "moment": "^2.30.1",
     "react": "19.0.0",
     "react-native": "0.79.2",
+    "react-native-calendars": "^1.1312.0",
     "react-native-chart-kit": "^6.12.0",
     "react-native-gesture-handler": "^2.25.0",
     "react-native-image-picker": "^8.2.1",

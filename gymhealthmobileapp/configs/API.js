@@ -15,6 +15,9 @@ export const endpoints = {
   trainingProgress: '/training-progress/',
   packages: '/packages/',
   currentuser: '/users/current-user/',
+  workoutessions: '/workout-sessions/me/registered-sessions/',
+  registerworkoutessions:'/workout-sessions/member/register/',
+  trainers:'/trainers/',
 };
 
 export const CLIENT_ID = 'xFbPBC3vOcOnf5e4dhcVcroXxeqed8Dnpb41PtPY';
