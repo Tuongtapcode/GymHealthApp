@@ -10,7 +10,7 @@ import { Picker } from "@react-native-picker/picker";
 // Định nghĩa các loại buổi tập cho Picker
 const SESSION_TYPES = [
   { label: "With PT", value: "pt_session" },
-  { label: "No PT", value: "strength" },
+  { label: "No PT", value: "self_training" },
 ];
 
 const Schedule = () => {
@@ -122,8 +122,7 @@ const Schedule = () => {
     if (!newSession.start_time) newErrors.start_time = "Vui lòng chọn giờ bắt đầu.";
     if (!newSession.end_time) newErrors.end_time = "Vui lòng chọn giờ kết thúc.";
     if (!newSession.session_type) newErrors.session_type = "Vui lòng chọn loại buổi tập.";
-    if (!newSession.trainer) newErrors.trainer = "Vui lòng chọn huấn luyện viên.";
-    // Ghi chú có thể không bắt buộc
+    // // Ghi chú có thể không bắt buộc
     return newErrors;
   };
 

@@ -19,14 +19,10 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
   const [animationHeightContact] = useState(new Animated.Value(0)); // Giá trị hoạt ảnh cho chiều cao Personal Info
   const [menuVisible, setMenuVisible] = useState(false); // State cho menu
   const [isModalVisible, setModalVisible] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [newPasswordError, setNewPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
-  const [isEditPersonalModalVisible, setEditPersonalModalVisible] = useState(false);
-  const [isEditHealthModalVisible, setEditHealthModalVisible] = useState(false);
-  const [isDatePickerVisible, setDatePickerVisible] = useState(false);
 
   // State để lưu thông tin chỉnh sửa
   const [editedPersonalInfo, setEditedPersonalInfo] = useState({
@@ -51,8 +47,9 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
   useEffect(() => {
     if (propUser) {
       setUser(propUser);
-      fetchHealthInfo(); // Lấy thông tin sức khỏe
       setLoading(false);
+      fetchUserData();
+      fetchHealthInfo(); // Lấy thông tin sức khỏe
       console.log('User from prop:', propUser);
       console.log('User from redux:', reduxUser);
     } else {
@@ -218,36 +215,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }).start();
   };
 
-  const handleSavePersonalInfo = async () => {
-    try {
-
-      const accessToken = await AsyncStorage.getItem('accessToken');
-      if (!accessToken) {
-        Alert.alert('Error', 'Access token not found. Please log in again.');
-        return;
-      }
-      const formData = new FormData();
-      formData.append('email', editedPersonalInfo.email);
-      formData.append('phone_number', editedPersonalInfo.phone_number);
-      formData.append('address', editedPersonalInfo.address);
-      formData.append('date_of_birth', editedPersonalInfo.date_of_birth);
-      const response = await authAPI(accessToken).patch(endpoints.currentuser, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      console.log('Server Response:', response.data);
-      if (response.status === 200) {
-        Alert.alert('Success', 'Personal information updated successfully.');
-        // setEditPersonalModalVisible(false);
-      } else {
-        Alert.alert('Error', 'Failed to change password. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error updating personal information:', error.response?.data || error.message);
-      Alert.alert('Error', 'Failed to update personal information.');
-    }
-  };
+  
 
   if (loading) {
     return (
@@ -335,117 +303,10 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
               <Text style={styles.infoLabel}>Date of Birth:</Text>
               <Text style={styles.infoValue}>{reduxUser?.date_of_birth || '...'}</Text>
             </View>
-            <TouchableOpacity style={styles.editButton} onPress={() => setEditPersonalModalVisible(true)}>
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
+           
           </>
         )}
       </Animated.View>
-
-
-
-
-      {/* Modal for editing personal information */}
-      <Modal
-        visible={isEditPersonalModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setEditPersonalModalVisible(false);
-          setDatePickerVisible(false); // Đóng DateTimePicker nếu đang mở
-        }}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Personal Information</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              value={editedPersonalInfo.email}
-              onChangeText={(text) =>
-                setEditedPersonalInfo({ ...editedPersonalInfo, email: text })
-              }
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Phone Number"
-              value={editedPersonalInfo.phone_number}
-              onChangeText={(text) =>
-                setEditedPersonalInfo({ ...editedPersonalInfo, phone_number: text })
-              }
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Address"
-              value={editedPersonalInfo.address}
-              onChangeText={(text) =>
-                setEditedPersonalInfo({ ...editedPersonalInfo, address: text })
-              }
-            />
-            {isEditPersonalModalVisible && (
-              <TouchableOpacity
-                style={styles.input}
-                onPress={() => setDatePickerVisible(true)}
-              >
-                <Text
-                  style={{
-                    color: editedPersonalInfo.date_of_birth ? '#000' : '#aaa',
-                  }}
-                >
-                  {editedPersonalInfo.date_of_birth || 'Select Date of Birth'}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {isEditPersonalModalVisible && isDatePickerVisible && (
-              <DateTimePicker
-                value={
-                  editedPersonalInfo.date_of_birth
-                    ? new Date(editedPersonalInfo.date_of_birth)
-                    : new Date()
-                }
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setDatePickerVisible(false); // Đóng DateTimePicker
-                  if (selectedDate) {
-                    setEditedPersonalInfo({
-                      ...editedPersonalInfo,
-                      date_of_birth: selectedDate
-                        .toISOString()
-                        .split('T')[0], // Lưu ngày ở định dạng YYYY-MM-DD
-                    });
-                  }
-                }}
-              />
-            )}
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  console.log('Save button pressed');
-                  handleSavePersonalInfo();
-                }}
-              >
-                <Text style={styles.modalButtonText}>Save</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setEditPersonalModalVisible(false);
-                  setDatePickerVisible(false); // Đóng DateTimePicker nếu đang mở
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-            </View>
-          </View>
-        </View>
-      </Modal>
-
 
 
 
@@ -490,79 +351,9 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
               <Text style={styles.infoLabel}>Medical Conditions:</Text>
               <Text style={styles.infoValue}>{healthInfo?.medical_conditions || '...'}</Text>
             </View>
-            <TouchableOpacity style={styles.editButton} onPress={() => setEditHealthModalVisible(true)}>
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
           </>
         )}
       </Animated.View>
-
-
-      <Modal
-        visible={isEditHealthModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setEditHealthModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Health Information</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Height (cm)"
-              value={editedHealthInfo.height}
-              onChangeText={(text) =>
-                setEditedHealthInfo({ ...editedHealthInfo, height: text })
-              }
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Weight (kg)"
-              value={editedHealthInfo.weight}
-              onChangeText={(text) =>
-                setEditedHealthInfo({ ...editedHealthInfo, weight: text })
-              }
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Training Goal"
-              value={editedHealthInfo.training_goal}
-              onChangeText={(text) =>
-                setEditedHealthInfo({ ...editedHealthInfo, training_goal: text })
-              }
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Health Conditions"
-              value={editedHealthInfo.health_conditions}
-              onChangeText={(text) =>
-                setEditedHealthInfo({ ...editedHealthInfo, health_conditions: text })
-              }
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  // Gửi thông tin chỉnh sửa lên server
-                  setEditHealthModalVisible(false);
-                  // Cập nhật healthInfo với thông tin mới
-                  setHealthInfo(editedHealthInfo);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Save</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => setEditHealthModalVisible(false)}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
 
 
