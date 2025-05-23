@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ScrollView } from 'react-native';
-import axiosInstance, { endpoints } from '../../configs/API';
+import axiosInstance, {  authAPI,endpoints } from '../../configs/API';
 import { CLIENT_ID, CLIENT_SECRET } from '../../configs/API';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDispatch } from 'react-redux';
@@ -30,22 +30,38 @@ export default function Login({ navigation, updateUser }) {
       if (response.data && response.data.access_token) {
         // Lưu accessToken vào AsyncStorage
         await AsyncStorage.setItem('accessToken', response.data.access_token);
-        
-        // Lưu thông tin người dùng vào AsyncStorage
-        const userData = { token: response.data.access_token, username: username};
-        await AsyncStorage.setItem('userData', JSON.stringify(userData));
 
-        // Dispatch action để cập nhật trạng thái login trong Redux
-        dispatch({
-          type: 'login',
-          payload: userData,
-        });
-        
+        // Lưu thông tin người dùng vào AsyncStorage
+        const accessToken = { token: response.data.access_token, username: username };
+        await AsyncStorage.setItem('userData', JSON.stringify(accessToken));
+
+
+        const responseUser = await authAPI(response.data.access_token).get(endpoints.currentuser);
+        if (responseUser.status >= 200 && responseUser.status < 300) {
+          const userData = responseUser.data;
+          console.log('User Data:', userData);
+          // Dispatch action để lưu thông tin người dùng vào Redux store
+          dispatch({
+            type: 'login',
+            payload: userData,
+          });
+        }
+
+
+        // Xac dinh role
+        if(responseUser.data.role=== 'MEMBER'){
+          updateUser(accessToken);
+        }
+        else {
+          //can viet them cac tab rieng cho trainer
+          navigation.navigate('TrainerHome');
+        }
+
         // Cập nhật trạng thái user trong TabNavigator
-        updateUser(userData);
+        
 
         Alert.alert('Login Successful', 'You have successfully logged in.');
-        
+
         // KHÔNG cần điều hướng đến Profile - TabNavigator sẽ tự động hiển thị các tab chính
       } else {
         Alert.alert('Login Failed', 'Invalid username or password.');

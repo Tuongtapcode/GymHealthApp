@@ -605,7 +605,7 @@ const Home = ({ navigation }) => {
         <View style={styles.sessionActions}>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("BookSession")}
+            onPress={() => navigation.navigate("Schedule")}
           >
             <Text style={styles.buttonPrimaryText}>Đặt lịch mới</Text>
           </TouchableOpacity>

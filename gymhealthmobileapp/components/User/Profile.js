@@ -45,17 +45,18 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
   const closeMenu = () => setMenuVisible(false);
 
   useEffect(() => {
-    if (propUser) {
-      setUser(propUser);
+    if (reduxUser) {
+      setUser(reduxUser);
+      // setUser(propUser);
       setLoading(false);
-      fetchUserData();
+      // fetchUserData();
       fetchHealthInfo(); // Lấy thông tin sức khỏe
       console.log('User from prop:', propUser);
       console.log('User from redux:', reduxUser);
     } else {
       fetchUserData();
     }
-  }, [propUser]);
+  }, [reduxUser]);
 
 
 

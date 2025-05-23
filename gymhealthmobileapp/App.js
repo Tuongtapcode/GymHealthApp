@@ -22,6 +22,7 @@ import Profile from "./components/User/Profile";
 import Schedule from "./components/Home/Schedule";
 import Progress from "./components/Home/Progress/Progress";
 import { PaperProvider } from "react-native-paper";
+import TrainerHome from "./components/Trainer/Trainer";
 
 // Import PackagesNavigator thay vì import trực tiếp Packages
 import PackagesNavigator from "./components/Home/Packages/PackagesNavigator";
@@ -35,6 +36,8 @@ const HomeStack = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="HomeMain" component={Home} />
+      <Stack.Screen name="Schedule" component={Schedule} />
+      <Stack.Screen name="Profile" component={Profile} />
       {/* Thêm các màn hình con khác của Home nếu cần */}
     </Stack.Navigator>
   );
@@ -240,6 +243,7 @@ export default function App() {
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Welcome" component={WelcomeScreen} />
             <Stack.Screen name="MainTabs" component={TabNavigator} />
+            <Stack.Screen name="TrainerHome" component={TrainerHome} />
           </Stack.Navigator>
         </NavigationContainer>
       </PaperProvider>
