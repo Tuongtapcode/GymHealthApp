@@ -4,7 +4,7 @@ from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanFi
     IntegerField, TimeField, ReadOnlyField
 
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
     WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
     FeedbackResponse
@@ -490,6 +490,118 @@ class WorkoutSessionListScheduleSerializer(ModelSerializer):
 
     def get_member_name(self, obj):
         return f"{obj.member.first_name} {obj.member.last_name}"
+
+
+# Thêm vào serializers.py
+
+class TrainerAllSessionsSerializer(ModelSerializer):
+    """Serializer chi tiết cho trainer xem tất cả lịch tập"""
+    member_name = SerializerMethodField()
+    member_username = SerializerMethodField()
+    member_phone = SerializerMethodField()
+    session_duration = SerializerMethodField()
+    time_until_session = SerializerMethodField()
+    subscription_info = SerializerMethodField()
+
+    class Meta:
+        model = WorkoutSession
+        fields = [
+            'id', 'member_id','member_name', 'member_username', 'member_phone',
+            'session_date', 'start_time', 'end_time', 'session_duration',
+            'session_type', 'status', 'notes', 'trainer_notes',
+            'time_until_session', 'subscription_info',
+            'created_at', 'updated_at'
+        ]
+
+
+    def get_member_name(self, obj):
+        return f"{obj.member.first_name} {obj.member.last_name}"
+
+    def get_member_username(self, obj):
+        return obj.member.username
+
+    def get_member_phone(self, obj):
+        # Assuming member has a profile with phone number
+        try:
+            return obj.member.member_profile.phone_number if hasattr(obj.member, 'member_profile') else None
+        except:
+            return None
+
+    def get_session_duration(self, obj):
+        """Tính thời lượng buổi tập (phút)"""
+        if obj.start_time and obj.end_time:
+            start_datetime = datetime.combine(obj.session_date, obj.start_time)
+            end_datetime = datetime.combine(obj.session_date, obj.end_time)
+            duration = end_datetime - start_datetime
+            return int(duration.total_seconds() / 60)  # Trả về số phút
+        return None
+
+    def get_time_until_session(self, obj):
+        """Tính thời gian còn lại đến buổi tập"""
+        now = datetime.now()
+        session_datetime = datetime.combine(obj.session_date, obj.start_time)
+
+        if session_datetime > now:
+            time_diff = session_datetime - now
+            days = time_diff.days
+            hours = time_diff.seconds // 3600
+            minutes = (time_diff.seconds % 3600) // 60
+
+            if days > 0:
+                return f"{days} ngày {hours} giờ"
+            elif hours > 0:
+                return f"{hours} giờ {minutes} phút"
+            else:
+                return f"{minutes} phút"
+        elif session_datetime.date() == now.date():
+            return "Hôm nay"
+        else:
+            return "Đã qua"
+
+    def get_subscription_info(self, obj):
+        """Thông tin gói tập của member"""
+        if obj.subscription:
+            return {
+                'id': obj.subscription.id,
+                'package_name': obj.subscription.package.name if obj.subscription.package else None,
+                'remaining_pt_sessions': obj.subscription.remaining_pt_sessions,
+                'end_date': obj.subscription.end_date
+            }
+        return None
+
+
+class TrainerSessionStatsSerializer(Serializer):
+    """Serializer cho thống kê buổi tập của trainer"""
+    total_sessions = IntegerField()
+    completed_sessions = IntegerField()
+    pending_sessions = IntegerField()
+    confirmed_sessions = IntegerField()
+    cancelled_sessions = IntegerField()
+    this_month_sessions = IntegerField()
+    this_week_sessions = IntegerField()
+    today_sessions = IntegerField()
+
+
+class CompactSessionSerializer(ModelSerializer):
+    """Serializer đơn giản cho danh sách buổi tập"""
+    member_name = SerializerMethodField()
+    status_display = SerializerMethodField()
+
+    class Meta:
+        model = WorkoutSession
+        fields = [
+            'id', 'member_name', 'session_date', 'start_time', 'end_time',
+            'session_type', 'status', 'status_display'
+        ]
+
+    def get_member_name(self, obj):
+        return f"{obj.member.first_name} {obj.member.last_name}"
+
+    def get_status_display(self, obj):
+        return obj.get_status_display()
+
+
+
 
 
 class WorkoutSessionUpdateSerializer(ModelSerializer):

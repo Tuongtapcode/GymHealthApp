@@ -605,13 +605,13 @@ const Home = ({ navigation }) => {
         <View style={styles.sessionActions}>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("Schedule")}
+            onPress={() => navigation.navigate("schedule")}
           >
             <Text style={styles.buttonPrimaryText}>Đặt lịch mới</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.buttonOutline}
-            onPress={() => navigation.navigate("Schedule")}
+            onPress={() => navigation.navigate("schedule")}
           >
             <Text style={styles.buttonOutlineText}>Xem tất cả</Text>
           </TouchableOpacity>

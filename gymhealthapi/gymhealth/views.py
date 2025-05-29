@@ -13,7 +13,7 @@ from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, W
 from gymhealth.perms import IsOwner, IsProfileOwnerOrManager
 from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSerializer, BenefitSerializer, \
     PackageTypeSerializer, PackageSerializer, PackageDetailSerializer, TrainerListSerializer, SubscriptionPackage
-from django.db.models import Min, Max, Q
+from django.db.models import Min, Max, Q, Count
 
 
 class UserViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
@@ -1156,6 +1156,235 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
             "schedule": schedule_by_date
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='trainer/all-sessions', url_name='trainer_all_sessions',
+            permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
+    def trainer_all_sessions(self, request):
+        """API để PT xem tất cả lịch tập của mình với các bộ lọc"""
+
+        # Lấy các tham số lọc từ request
+        status_filter = request.query_params.get('status', 'all')
+        date_from = request.query_params.get('date_from', None)
+        date_to = request.query_params.get('date_to', None)
+        session_type = request.query_params.get('type', None)
+        member_name = request.query_params.get('member_name', None)
+
+        # Tạo queryset cơ bản - lấy tất cả buổi tập của trainer
+        queryset = WorkoutSession.objects.filter(trainer=request.user)
+
+        # Áp dụng các bộ lọc
+        if status_filter != 'all':
+            queryset = queryset.filter(status=status_filter)
+
+        if date_from:
+            try:
+                date_from_parsed = datetime.strptime(date_from, '%Y-%m-%d').date()
+                queryset = queryset.filter(session_date__gte=date_from_parsed)
+            except ValueError:
+                return Response(
+                    {"error": "Định dạng date_from không hợp lệ. Sử dụng YYYY-MM-DD"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if date_to:
+            try:
+                date_to_parsed = datetime.strptime(date_to, '%Y-%m-%d').date()
+                queryset = queryset.filter(session_date__lte=date_to_parsed)
+            except ValueError:
+                return Response(
+                    {"error": "Định dạng date_to không hợp lệ. Sử dụng YYYY-MM-DD"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if session_type:
+            queryset = queryset.filter(session_type=session_type)
+
+        if member_name:
+            queryset = queryset.filter(
+                Q(member__first_name__icontains=member_name) |
+                Q(member__last_name__icontains=member_name) |
+                Q(member__username__icontains=member_name)
+            )
+
+        # Sắp xếp kết quả theo ngày gần nhất trước
+        queryset = queryset.order_by('-session_date', 'start_time')
+
+        # Đếm tổng số bản ghi trước khi phân trang
+        total_count = queryset.count()
+
+        # Sử dụng DRF pagination
+        paginator = paginators.ItemPaginator()
+        page = paginator.paginate_queryset(queryset, request)
+
+        if page is not None:
+            # Serialize dữ liệu
+            serializer = serializers.TrainerAllSessionsSerializer(page, many=True)
+
+            # Thống kê theo trạng thái (trên toàn bộ queryset, không chỉ trang hiện tại)
+            status_stats = queryset.values('status').annotate(count=Count('status'))
+            stats = {stat['status']: stat['count'] for stat in status_stats}
+
+            # Tạo response với pagination data
+            paginated_response = paginator.get_paginated_response(serializer.data)
+
+            # Thêm thống kê vào response
+            paginated_response.data.update({
+                "statistics": {
+                    "total_sessions": total_count,
+                    "status_breakdown": stats,
+                    "filters_applied": {
+                        "status": status_filter,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                        "session_type": session_type,
+                        "member_name": member_name
+                    }
+                }
+            })
+
+            return paginated_response
+
+        # Fallback nếu pagination không hoạt động (không nên xảy ra)
+        serializer = serializers.TrainerAllSessionsSerializer(queryset, many=True)
+        return Response({
+            "sessions": serializer.data,
+            "statistics": {
+                "total_sessions": total_count,
+                "status_breakdown": {},
+                "filters_applied": {
+                    "status": status_filter,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "session_type": session_type,
+                    "member_name": member_name
+                }
+            }
+        })
+    @action(detail=False, methods=['get'], url_path='trainer/dashboard-stats', url_name='trainer_dashboard_stats',
+            permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
+    def trainer_dashboard_stats(self, request):
+        """API để PT xem thống kê tổng quan về lịch tập của mình"""
+
+        # Lấy tháng hiện tại nếu không có tham số
+        month = request.query_params.get('month', datetime.now().month)
+        year = request.query_params.get('year', datetime.now().year)
+
+        try:
+            month = int(month)
+            year = int(year)
+        except ValueError:
+            return Response(
+                {"error": "Tháng và năm phải là số nguyên"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Query cơ bản cho trainer
+        base_query = WorkoutSession.objects.filter(trainer=request.user)
+
+        # Thống kê tổng thể
+        total_sessions = base_query.count()
+
+        # Thống kê theo trạng thái
+        status_stats = base_query.values('status').annotate(count=Count('status'))
+        status_breakdown = {stat['status']: stat['count'] for stat in status_stats}
+
+        # Thống kê tháng hiện tại
+        monthly_query = base_query.filter(
+            session_date__month=month,
+            session_date__year=year
+        )
+
+        monthly_stats = {
+            'total': monthly_query.count(),
+            'completed': monthly_query.filter(status='completed').count(),
+            'pending': monthly_query.filter(status='pending').count(),
+            'confirmed': monthly_query.filter(status='confirmed').count(),
+            'cancelled': monthly_query.filter(status='cancelled').count(),
+        }
+
+        # Thống kê 7 ngày gần nhất
+        seven_days_ago = datetime.now().date() - timedelta(days=7)
+        recent_query = base_query.filter(session_date__gte=seven_days_ago)
+
+        recent_stats = {
+            'total': recent_query.count(),
+            'completed': recent_query.filter(status='completed').count(),
+            'upcoming': recent_query.filter(
+                session_date__gte=datetime.now().date(),
+                status__in=['pending', 'confirmed']
+            ).count()
+        }
+
+        # Top members (khách hàng tập nhiều nhất)
+        top_members = base_query.filter(status='completed').values(
+            'member__first_name', 'member__last_name', 'member__username'
+        ).annotate(
+            session_count=Count('id')
+        ).order_by('-session_count')[:5]
+
+        # Lịch sắp tới (3 ngày tới)
+        upcoming_sessions = base_query.filter(
+            session_date__gte=datetime.now().date(),
+            session_date__lte=datetime.now().date() + timedelta(days=3),
+            status__in=['pending', 'confirmed']
+        ).order_by('session_date', 'start_time')[:10]
+
+        upcoming_serializer = serializers.WorkoutSessionListScheduleSerializer(upcoming_sessions, many=True)
+
+        return Response({
+            "overview": {
+                "total_sessions": total_sessions,
+                "status_breakdown": status_breakdown,
+            },
+            "monthly_stats": {
+                "month": month,
+                "year": year,
+                "stats": monthly_stats
+            },
+            "recent_week_stats": recent_stats,
+            "top_members": [
+                {
+                    "name": f"{member['member__first_name']} {member['member__last_name']}",
+                    "username": member['member__username'],
+                    "completed_sessions": member['session_count']
+                }
+                for member in top_members
+            ],
+            "upcoming_sessions": upcoming_serializer.data
+        })
+
+    @action(detail=False, methods=['get'], url_path='trainer/today-schedule', url_name='trainer_today_schedule',
+            permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
+    def trainer_today_schedule(self, request):
+        """API để PT xem lịch tập hôm nay"""
+
+        today = datetime.now().date()
+
+        # Lấy tất cả buổi tập hôm nay
+        today_sessions = WorkoutSession.objects.filter(
+            trainer=request.user,
+            session_date=today
+        ).order_by('start_time')
+
+        # Thống kê nhanh
+        total_today = today_sessions.count()
+        completed_today = today_sessions.filter(status='completed').count()
+        pending_today = today_sessions.filter(status='pending').count()
+        confirmed_today = today_sessions.filter(status='confirmed').count()
+        cancelled_today = today_sessions.filter(status='cancelled').count()
+
+        serializer = serializers.WorkoutSessionListScheduleSerializer(today_sessions, many=True)
+
+        return Response({
+            "date": today,
+            "summary": {
+                "total": total_today,
+                "completed": completed_today,
+                "pending": pending_today,
+                "confirmed": confirmed_today,
+                "cancelled": cancelled_today
+            },
+            "sessions": serializer.data
+        })
 
 class TrainingProgressViewSet(viewsets.ViewSet):
     serializer_class = serializers.TrainingProgressSerializer
@@ -1494,6 +1723,46 @@ class TrainingProgressViewSet(viewsets.ViewSet):
         except (User.DoesNotExist, HealthInfo.DoesNotExist):
             return Response(
                 {"error": "Không tìm thấy hội viên hoặc thông tin sức khỏe"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=False, methods=['get'], url_path='session/(?P<session_id>\d+)')
+    def session_progress(self, request, session_id=None):
+        """Lấy bản ghi tiến độ của một session cụ thể"""
+        try:
+            # Lấy thông tin workout session
+            workout_session = WorkoutSession.objects.get(id=session_id)
+
+            # Kiểm tra quyền - chỉ trainer của session hoặc member của session mới xem được
+            user = request.user
+            if not user.is_trainer and user != workout_session.member:
+                return Response(
+                    {"error": "Bạn không có quyền xem tiến độ của phiên tập này"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Nếu là trainer, kiểm tra có phải trainer của session này không
+            if user.is_trainer and user != workout_session.trainer:
+                return Response(
+                    {"error": "Bạn không có quyền xem tiến độ của phiên tập này"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Tìm bản ghi tiến độ cho session này
+            try:
+                progress = TrainingProgress.objects.get(workout_session=workout_session)
+                serializer = self.get_serializer(progress)
+                return Response(serializer.data)
+
+            except TrainingProgress.DoesNotExist:
+                return Response(
+                    {"error": "Chưa có bản ghi tiến độ cho phiên tập này"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        except WorkoutSession.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy phiên tập"},
                 status=status.HTTP_404_NOT_FOUND
             )
     #
