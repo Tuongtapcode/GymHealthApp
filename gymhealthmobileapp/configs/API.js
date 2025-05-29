@@ -2,7 +2,7 @@ import { current } from "@reduxjs/toolkit";
 import axios from "axios";
 
 // Địa chỉ cơ bản của server
-const BASE_URL = "http://192.168.1.6:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = "http://192.168.1.9:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 
 // Định nghĩa các endpoint
 export const endpoints = {
@@ -19,6 +19,8 @@ export const endpoints = {
   trainers:'/trainers/',
   verifyPayment: "/subscription/{subscriptionId}/verify-payment/",
   healthinfo: "/health-info/my/",
+  updateStatusSession: "/workout-sessions/{id}/confirm-session/",
+  updateHealthInfo: "/health-info/update/",
 };
 
 export const CLIENT_ID = "xFbPBC3vOcOnf5e4dhcVcroXxeqed8Dnpb41PtPY";

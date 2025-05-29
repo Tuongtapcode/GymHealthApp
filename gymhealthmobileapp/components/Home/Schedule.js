@@ -1,3 +1,4 @@
+// Import các thư viện cần thiết
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, ScrollView } from "react-native";
 import { Calendar } from "react-native-calendars";
@@ -6,18 +7,28 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { authAPI, endpoints } from "../../configs/API";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
-
+import { Modal, Button } from "react-native";
 // Định nghĩa các loại buổi tập cho Picker
 const SESSION_TYPES = [
   { label: "With PT", value: "pt_session" },
   { label: "No PT", value: "self_training" },
 ];
 
+// Định nghĩa các bộ lọc trạng thái buổi tập
+const FILTER_OPTIONS = [
+  { label: "Tất cả", value: "all" },
+  { label: "Đang đợi duyệt", value: "pending" },
+  { label: "Được đề xuất", value: "rescheduled" },
+  { label: "Đã được chấp nhận", value: "confirmed" },
+  { label: "Đã hoàn thành", value: "completed" },
+  { label: "Đã huỷ", value: "cancelled" },
+];
+
 const Schedule = () => {
   // =========================
   // ==== STATE & EFFECTS ====
   // =========================
-  // (Các state và useEffect dùng chung cho cả hai tab)
+
   // State lưu các ngày được đánh dấu trên lịch (có buổi tập)
   const [markedDates, setMarkedDates] = useState({});
   // State lưu ngày đang được chọn trên lịch (dạng yyyy-mm-dd)
@@ -55,6 +66,21 @@ const Schedule = () => {
   const [errors, setErrors] = useState({});
   // State cho thông báo tổng nếu có trường bị bỏ trống
   const [emptyFieldAlert, setEmptyFieldAlert] = useState("");
+
+  // Thêm state cho bộ lọc
+  const [filterStatus, setFilterStatus] = useState("all");
+
+
+  // Thêm state cho modal cập nhật thông tin sức khỏe
+  const [showHealthModal, setShowHealthModal] = useState(false);
+  const [healthInfo, setHealthInfo] = useState({
+    height: "",
+    weight: "",
+    health_conditions: "",
+  });
+
+  // Thêm state cho lỗi nhập liệu trong modal
+  const [healthErrors, setHealthErrors] = useState({});
 
   // Lấy danh sách trainer khi chuyển sang tab Add session
   useEffect(() => {
@@ -110,6 +136,24 @@ const Schedule = () => {
       setDidSetDefault(true);
     }
   }, [sessions, didSetDefault]);
+
+  // Đánh dấu các ngày có buổi tập phù hợp với filterStatus
+  useEffect(() => {
+    const marks = {};
+    sessions.forEach(item => {
+      if (!item.session_date) return;
+      // Kiểm tra trạng thái theo filterStatus
+      const matchStatus = filterStatus === "all" ? true : item.status === filterStatus;
+      if (matchStatus) {
+        marks[item.session_date] = {
+          marked: true,
+          dotColor: "#4e5ba6",
+          customStyles: { text: { color: "#4e5ba6" } },
+        };
+      }
+    });
+    setMarkedDates(marks);
+  }, [sessions, filterStatus]);
 
   // =========================
   // ===== TAB ADD SESSION ===
@@ -224,17 +268,117 @@ const Schedule = () => {
   // ===== TAB DASHBOARD =====
   // =========================
 
-  // Lọc ra các buổi tập của ngày đang chọn (Dashboard)
+  // Lọc ra các buổi tập của ngày đang chọn (Dashboard) và theo bộ lọc
   const sessionsForSelectedDate = sessions.filter(item => {
     // Lấy đúng 10 ký tự đầu (yyyy-mm-dd) để so sánh
     const sessionDay = item.session_date ? item.session_date.slice(0, 10) : "";
     const selectedDay = selected ? selected.slice(0, 10) : "";
-    return sessionDay === selectedDay;
+    const matchDate = sessionDay === selectedDay;
+    const matchStatus = filterStatus === "all" ? true : item.status === filterStatus;
+    return matchDate && matchStatus;
   });
 
   // Hàm xử lý khi người dùng nhấn vào 1 ngày trên Calendar (Dashboard)
   const handleDayPress = day => {
     setSelected(day.dateString);
+  };
+
+  //các hàm xử lý sự kiện ở các buổi tập
+
+  // Hàm hủy buổi tập
+  const handleCancelSession = async (sessionId) => {
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      // Gửi request cập nhật status
+      await authAPI(accessToken).patch(
+        endpoints.updateStatusSession.replace("{id}", sessionId),
+        { status: "cancelled" }
+      );
+      // Sau khi cập nhật thành công, reload lại danh sách buổi tập
+      const response = await authAPI(accessToken).get(endpoints.workoutessions);
+      setSessions(response.data);
+      alert("Đã hủy buổi tập thành công!");
+    } catch (error) {
+      alert("Có lỗi khi hủy buổi tập!");
+      console.error(error);
+    }
+  };
+
+  // Hàm xác nhận lại buổi tập đã được reschedule
+  const handleConfirmSession = async (sessionId) => {
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      // Gửi request cập nhật status
+      await authAPI(accessToken).patch(
+        endpoints.updateStatusSession.replace("{id}", sessionId),
+        { status: "confirmed" }
+      );
+      // Sau khi cập nhật thành công, reload lại danh sách buổi tập
+      const response = await authAPI(accessToken).get(endpoints.workoutessions);
+      setSessions(response.data);
+      alert("Đã xác nhận buổi tập thành công!");
+    } catch (error) {
+      alert("Có lỗi khi xác nhận buổi tập!");
+      console.error(error);
+    }
+  };
+
+  // Hàm mở modal
+  const openHealthModal = () => {
+    setShowHealthModal(true);
+  };
+
+
+  // Hàm đóng modal
+  const closeHealthModal = () => {
+    setShowHealthModal(false);
+    setHealthInfo({
+      height: "",
+      weight: "",
+      health_conditions: "",
+    });
+  };
+
+  // Hàm xử lý lưu thông tin sức khỏe 
+  const handleSaveHealthInfo = async () => {
+    const errors = validateHealthInfo();
+    if (Object.keys(errors).length > 0) {
+      setHealthErrors(errors);
+      return;
+    }
+    setHealthErrors({});
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      // Tạo form data
+      const formData = new FormData();
+      formData.append("height", healthInfo.height);
+      formData.append("weight", healthInfo.weight);
+      formData.append("health_conditions", healthInfo.health_conditions);
+
+      await authAPI(accessToken).patch(
+        endpoints.updateHealthInfo,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+      alert("Cập nhật thông tin sức khỏe thành công!");
+      closeHealthModal();
+    } catch (error) {
+      alert("Có lỗi khi cập nhật thông tin sức khỏe!");
+      console.error(error);
+    }
+  };
+
+  // Hàm validate các trường trong modal
+  const validateHealthInfo = () => {
+    const errors = {};
+    if (!healthInfo.height) errors.height = "Vui lòng nhập chiều cao.";
+    if (!healthInfo.weight) errors.weight = "Vui lòng nhập cân nặng.";
+    if (!healthInfo.health_conditions) errors.health_conditions = "Vui lòng nhập tình trạng sức khỏe.";
+    return errors;
   };
 
   // =========================
@@ -268,9 +412,32 @@ const Schedule = () => {
         </Text>
       </View>
 
-      {/* Sub header: tiêu đề phụ */}
+      {/* Bộ lọc trạng thái buổi tập (chỉ hiển thị ở tab Dashboard) */}
       <View style={styles.subHeader}>
-        <Text style={styles.subHeaderText}>Workout schedule</Text>
+        {activeTab === "dashboard" && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: 12, marginBottom: 1 }}>
+            {FILTER_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={{
+                  paddingVertical: 6, // Khoảng cách trên/dưới của nút lọc
+                  paddingHorizontal: 14, // Khoảng cách trái/phải của nút lọc
+                  borderRadius: 16, // Bo tròn góc nút lọc
+                  backgroundColor: filterStatus === option.value ? "#4e5ba6" : "#f2f4f8", // Đổi màu khi được chọn
+                  marginRight: 8, // Khoảng cách giữa các nút lọc
+                  height: 36, // Cố định chiều cao nút lọc
+                  justifyContent: "center", // Căn giữa text theo chiều dọc
+                  alignItems: "center", // Căn giữa text theo chiều ngang
+                }}
+                onPress={() => setFilterStatus(option.value)}
+              >
+                <Text style={{ color: filterStatus === option.value ? "#fff" : "#7a7a7a", fontWeight: "500" }}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* =========================
@@ -497,13 +664,98 @@ const Schedule = () => {
                   }}
                 >
                   <Text style={{ fontWeight: "bold", fontSize: 16, color: "#4e5ba6" }}>
+                    ID: {item.id || "Không rõ"}
+                  </Text>
+                  <Text style={{ fontWeight: "bold", fontSize: 15, color: "#4e5ba6" }}>
                     Member: {item.member_name || "Không rõ"}
                   </Text>
                   <Text>Day Workout: {item.session_date || "Không rõ"}</Text>
                   <Text>Time: {item.start_time || "?"} - {item.end_time || "?"}</Text>
                   <Text>Session Type: {item.session_type || "Không rõ"}</Text>
-                  <Text>Status: {item.status || "Không rõ"}</Text>
+                  {/* Highlight giá trị status */}
+                  <Text>
+                    Status:{" "}
+                    <Text
+                      style={{
+                        color:
+                          item.status === "confirmed"
+                            ? "#2ecc40"
+                            : item.status === "completed"
+                              ? "#2ecc40"
+                              : item.status === "pending"
+                                ? "#e67e22"
+                                : item.status === "rescheduled"
+                                  ? "#e67e22"
+                                  : item.status === "cancelled"
+                                    ? "#e74c3c"
+                                    : "#4e5ba6",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {item.status || "Không rõ"}
+                    </Text>
+                  </Text>
                   <Text>Notes: {item.notes || "Không có"}</Text>
+
+                  {/* Nút thao tác theo status */}
+                  {item.status === "completed" && (
+                    <TouchableOpacity
+                      style={{
+                        backgroundColor: "#4e5ba6",
+                        padding: 8,
+                        borderRadius: 6,
+                        marginTop: 10,
+                      }}
+                      onPress={() => {
+                        openHealthModal();
+                      }}
+                    >
+                      <Text style={{ color: "#fff", textAlign: "center" }}>Update Health Information</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {(item.status === "confirmed" || item.status === "pending") && (
+                    <TouchableOpacity
+                      style={{
+                        backgroundColor: "#e74c3c",
+                        padding: 8,
+                        borderRadius: 6,
+                        marginTop: 10,
+                      }}
+                      onPress={() => handleCancelSession(item.id)}
+                    >
+                      <Text style={{ color: "#fff", textAlign: "center" }}>Cancel</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {item.status === "rescheduled" && (
+                    <View style={{ flexDirection: "row", marginTop: 10, gap: 10 }}>
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#2ecc40",
+                          padding: 8,
+                          borderRadius: 6,
+                          flex: 1,
+                          marginRight: 5,
+                        }}
+                        onPress={() => handleConfirmSession(item.id)}
+                      >
+                        <Text style={{ color: "#fff", textAlign: "center" }}>Confirm</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#e74c3c",
+                          padding: 8,
+                          borderRadius: 6,
+                          flex: 1,
+                          marginLeft: 5,
+                        }}
+                        onPress={() => handleCancelSession(item.id)}
+                      >
+                        <Text style={{ color: "#fff", textAlign: "center" }}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               ))
             ) : (
@@ -515,17 +767,77 @@ const Schedule = () => {
         </>
         // KẾT THÚC CODE TAB DASHBOARD
       )}
+
+      {/* Modal cập nhật thông tin sức khỏe */}
+      <Modal
+        visible={showHealthModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeHealthModal}
+      >
+        <View style={modalStyles.modalOverlay}>
+          <View style={modalStyles.modalContainer}>
+            <Text style={modalStyles.modalTitle}>Update Health Information</Text>
+            <Text>Height (cm):</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              value={healthInfo.height}
+              onChangeText={v => setHealthInfo({ ...healthInfo, height: v })}
+              placeholder="Nhập chiều cao"
+            />
+            {healthErrors.height && (
+              <Text style={styles.errorText}>{healthErrors.height}</Text>
+            )}
+            <Text>Weight (kg):</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              value={healthInfo.weight}
+              onChangeText={v => setHealthInfo({ ...healthInfo, weight: v })}
+              placeholder="Nhập cân nặng"
+            />
+            {healthErrors.weight && (
+              <Text style={styles.errorText}>{healthErrors.weight}</Text>
+            )}
+            <Text>Health Conditions:</Text>
+            <TextInput
+              style={styles.input}
+              value={healthInfo.health_conditions}
+              onChangeText={v => setHealthInfo({ ...healthInfo, health_conditions: v })}
+              placeholder="Nhập tình trạng sức khỏe"
+            />
+            {healthErrors.health_conditions && (
+              <Text style={styles.errorText}>{healthErrors.health_conditions}</Text>
+            )}
+            <View style={modalStyles.modalButtonRow}>
+              <TouchableOpacity
+                style={modalStyles.cancelButton}
+                onPress={closeHealthModal}
+              >
+                <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={modalStyles.saveButton}
+                onPress={handleSaveHealthInfo}
+              >
+                <Text style={modalStyles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 // Các style cho component
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  container: { flex: 1, backgroundColor: "#fff" }, // Container chính, chiếm toàn bộ màn hình
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: "row", // Header nằm ngang
+    alignItems: "center", // Căn giữa các thành phần theo chiều dọc
+    justifyContent: "space-between", // Cách đều hai bên
     paddingHorizontal: 24,
     paddingTop: 24,
     paddingBottom: 8,
@@ -560,8 +872,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginHorizontal: 24,
+    marginHorizontal: 10,
     marginBottom: 8,
+    marginTop: 6,
   },
   subHeaderText: {
     color: "#7a7a7a",
@@ -640,6 +953,60 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginBottom: 8,
   },
+});
+const modalStyles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  modalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 24,
+    width: "85%",
+    elevation: 5
+  },
+  modalTitle: {
+    fontWeight: "bold",
+    fontSize: 18,
+    marginBottom: 12
+  },
+  modalButtonRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 12
+  },
+  cancelButton: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e74c3c",
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginRight: 12,
+    // Đổ bóng nhẹ cho nút Cancel
+    shadowColor: "#e74c3c",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cancelButtonText: {
+    color: "#e74c3c",
+    fontWeight: "bold"
+  },
+  saveButton: {
+    backgroundColor: "#4e5ba6",
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 6
+  },
+  saveButtonText: {
+    color: "#fff",
+    fontWeight: "bold"
+  }
 });
 
 export default Schedule;

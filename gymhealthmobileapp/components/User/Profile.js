@@ -8,7 +8,7 @@ import { Menu, Divider } from 'react-native-paper'; // Thay đổi thư viện M
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import DateTimePicker from '@react-native-community/datetimepicker';
-
+import { useFocusEffect } from '@react-navigation/native';
 export default function Profile({ navigation, user: propUser, updateUser }) {
   const [user, setUser] = useState(propUser || null);
   const [healthInfo, setHealthInfo] = useState(null); // Thêm state cho thông tin sức khỏe
@@ -58,7 +58,11 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }
   }, [reduxUser]);
 
-
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchHealthInfo();
+    }, [])
+  );
 
 
   const handleChangePassword = () => {
@@ -216,7 +220,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }).start();
   };
 
-  
+
 
   if (loading) {
     return (
@@ -304,7 +308,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
               <Text style={styles.infoLabel}>Date of Birth:</Text>
               <Text style={styles.infoValue}>{reduxUser?.date_of_birth || '...'}</Text>
             </View>
-           
+
           </>
         )}
       </Animated.View>
