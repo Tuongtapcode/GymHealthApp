@@ -8,6 +8,8 @@ import { authAPI, endpoints } from "../../configs/API";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
 import { Modal, Button } from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
+import { useNavigation } from "@react-navigation/native";
 // Định nghĩa các loại buổi tập cho Picker
 const SESSION_TYPES = [
   { label: "With PT", value: "pt_session" },
@@ -28,6 +30,7 @@ const Schedule = () => {
   // =========================
   // ==== STATE & EFFECTS ====
   // =========================
+   const navigation = useNavigation();
 
   // State lưu các ngày được đánh dấu trên lịch (có buổi tập)
   const [markedDates, setMarkedDates] = useState({});
@@ -756,6 +759,35 @@ const Schedule = () => {
                       </TouchableOpacity>
                     </View>
                   )}
+
+                  {(item.session_type === "pt_session") && (
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: "#64b5f6", // Xanh da trời nhạt
+                        paddingVertical: 10,
+                        paddingHorizontal: 18,
+                        borderRadius: 24,
+                        marginLeft: 5,
+                        marginTop: 10,
+                        alignSelf: "flex-start",
+                        shadowColor: "#64b5f6",
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.15,
+                        shadowRadius: 4,
+                        elevation: 3,
+                      }}
+                      activeOpacity={0.8}
+                      onPress={() =>
+                       navigation.navigate("Chat", { memberId: item.trainer_id, userId: item.member_id })
+                      }
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={22} color="#fff" style={{ marginRight: 10 }} />
+                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 16, letterSpacing: 0.5 }}>Nhắn tin</Text>
+                    </TouchableOpacity>
+                  )}
+
                 </View>
               ))
             ) : (

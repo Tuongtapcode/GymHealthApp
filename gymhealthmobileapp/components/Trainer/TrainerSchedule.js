@@ -581,7 +581,7 @@ const TrainerSchedule = ({ navigation }) => {
         </View>
         <TouchableOpacity
           style={styles.statusButton}
-          //   onPress={() => showStatusChangeOptions(item)}
+        //   onPress={() => showStatusChangeOptions(item)}
         >
           <View
             style={[
@@ -632,16 +632,16 @@ const TrainerSchedule = ({ navigation }) => {
         {/* Nút Chi tiết - luôn hiển thị */}
 
         {/* Nút Nhắn tin - luôn hiển thị */}
+
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() =>
-            navigation.navigate("Chat", { memberId: item.member_id })
+            navigation.navigate("Chat", { memberId: item.member_id, userId: item.trainer_id })
           }
         >
           <Icon name="chat" size={20} color="#2196F3" />
           <Text style={styles.actionButtonText}>Nhắn tin</Text>
         </TouchableOpacity>
-
         {/* Nút theo trạng thái */}
         {item.status === "pending" && (
           <>
@@ -974,7 +974,7 @@ const TrainerSchedule = ({ navigation }) => {
                       style={[
                         styles.filterOption,
                         selectedStatus === option.key &&
-                          styles.filterOptionSelected,
+                        styles.filterOptionSelected,
                       ]}
                       onPress={() => setSelectedStatus(option.key)}
                     >
@@ -988,7 +988,7 @@ const TrainerSchedule = ({ navigation }) => {
                         style={[
                           styles.filterOptionText,
                           selectedStatus === option.key &&
-                            styles.filterOptionTextSelected,
+                          styles.filterOptionTextSelected,
                         ]}
                       >
                         {option.label}
@@ -1013,7 +1013,7 @@ const TrainerSchedule = ({ navigation }) => {
                       style={[
                         styles.filterOption,
                         selectedDateRange === option.key &&
-                          styles.filterOptionSelected,
+                        styles.filterOptionSelected,
                       ]}
                       onPress={() => setSelectedDateRange(option.key)}
                     >
@@ -1021,7 +1021,7 @@ const TrainerSchedule = ({ navigation }) => {
                         style={[
                           styles.filterOptionText,
                           selectedDateRange === option.key &&
-                            styles.filterOptionTextSelected,
+                          styles.filterOptionTextSelected,
                         ]}
                       >
                         {option.label}

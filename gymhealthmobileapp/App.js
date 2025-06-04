@@ -32,7 +32,7 @@ import PackagesNavigator from "./components/Home/Packages/PackagesNavigator";
 import ProgressNavigator from "./components/Home/Progress/ProgressNavigator";
 import Trainer from "./components/Trainer/Trainer";
 import TrainingProgress from "./components/Trainer/TrainingProgress";
-
+import ChatScreen from "./components/Firebase/ChatScreen";
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -380,6 +380,11 @@ export default function App() {
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Welcome" component={WelcomeScreen} />
             <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+             <Stack.Screen
+              name="Chat"
+              component={ChatScreen}
+              options={{ headerShown: true, title: "Chat" }}
+            />
           </Stack.Navigator>
         </NavigationContainer>
       </PaperProvider>
