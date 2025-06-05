@@ -21,7 +21,7 @@
     "expo": "~53.0.9",
     "expo-image-picker": "^16.1.4",
     "expo-status-bar": "~2.2.3",
-    "firebase": "^11.8.1",
+    "firebase": "^11.9.0",
     "jwt-decode": "^4.0.0",
     "moment": "^2.30.1",
     "react": "19.0.0",
@@ -38,6 +38,7 @@
     "react-native-screens": "^4.10.0",
     "react-native-svg": "^15.12.0",
     "react-native-vector-icons": "^10.2.0",
+    "react-native-webview": "^13.13.5",
     "react-redux": "^9.2.0"
   },
   "devDependencies": {

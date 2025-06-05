@@ -45,9 +45,100 @@ INSTALLED_APPS = [
     'corsheaders',
 ]
 
+
+
+
+# settings.py
+VNPAY_CONFIG = {
+    'TMN_CODE': '643RJMBQ',
+    'HASH_SECRET': 'V3025B1XYEAPJFBN9FSXWEXIC52YRTMM',  # ✔ Đúng theo email
+    'URL': 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+    'API_URL': 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
+    'RETURN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/vnpay/return/',
+    'IPN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/vnpay/ipn/',
+    'VERSION': '2.1.0',
+    'COMMAND': 'pay',
+    'CURR_CODE': 'VND',
+    'LOCALE': 'vn',
+}
+
+
+MOMO_CONFIG = {
+    'ENDPOINT': 'https://test-payment.momo.vn/v2/gateway/api/create',
+    'ACCESS_KEY': 'F8BBA842ECF85',
+    'SECRET_KEY': 'K951B6PE1waDMi640xX08PD3vg6EkVlz',
+    'PARTNER_CODE': 'MOMO',
+    'PARTNER_NAME': 'MoMo Payment',
+    'STORE_ID': 'Test Store',
+    'REQUEST_TYPE': 'payWithMethod',
+    'AUTO_CAPTURE': True,
+    'LANG': 'vi',
+    # URLs callback
+    'REDIRECT_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/momo/return/',
+    'IPN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/momo/ipn/',
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'momo_payments.log',
+        },
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'your_app.views': {  # Thay 'your_app' bằng tên app của bạn
+            'handlers': ['file', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+
+}
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ('oauth2_provider.contrib.rest_framework.OAuth2Authentication',)
 }
+
+
+# settings.py - Cấu hình Celery
+
+CCELERY_BEAT_SCHEDULE = {
+    'send-session-reminders': {
+        'task': 'tasks.notification_tasks.send_session_reminders',
+        'schedule': 60.0,  # Chạy mỗi phút
+    },
+    'send-expiry-reminders': {
+        'task': 'tasks.notification_tasks.send_expiry_reminders',
+        'schedule': 3600.0,  # Chạy mỗi giờ
+    },
+}
+
+# Cấu hình email
+EMAIL_NOTIFICATIONS_ENABLED = True
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'your-email@gmail.com'
+EMAIL_HOST_PASSWORD = 'your-app-password'
+DEFAULT_FROM_EMAIL = 'Gym Management System <your-email@gmail.com>'
+
+
+# Thông tin gym
+GYM_NAME = 'Your Gym Name'
+GYM_ADDRESS = 'Địa chỉ phòng gym của bạn'
+
+CELERY_TIMEZONE = 'Asia/Ho_Chi_Minh'
+
 
 import cloudinary
 import cloudinary.uploader
@@ -73,7 +164,10 @@ MIDDLEWARE = [
 AUTH_USER_MODEL = 'gymhealth.User'
 
 import pymysql
-ALLOWED_HOSTS=['192.168.1.9']
+ALLOWED_HOSTS=['*']
+CSRF_TRUSTED_ORIGINS = [
+    'https://c11e-171-231-61-11.ngrok-free.app',
+]
 pymysql.install_as_MySQLdb()
 ROOT_URLCONF = 'gymhealthapi.urls'
 TEMPLATES = [
@@ -101,11 +195,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'gymhealthdb',
         'USER': 'root',
-        'PASSWORD': '060204',
+        'PASSWORD': 'Admin@123',
         'HOST': ''  # mặc định localhost
     }
 }
-
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -123,6 +216,8 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -149,7 +244,7 @@ OAUTH2_PROVIDER = {
     'OAUTH2_BACKEND_CLASS': 'oauth2_provider.oauth2_backends.JSONOAuthLibCore',
 }
 
-CLIENT_ID = 'xFbPBC3vOcOnf5e4dhcVcroXxeqed8Dnpb41PtPY'
-CLIENT_SECRET = 'aJhbfraNTsaTdsr8RqbWmsPM177OGRzlpOrxoCNXqlP9aPPAYFZikipa9rotIp4Ql9QlysSKu8HEHh0ewQC84JspFZA8BubRdGen5NSJHiZNMjqz9XLpixW8L16pCMpr'
+CLIENT_ID = 'AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh'
+CLIENT_SECRET = '89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o'
 
 

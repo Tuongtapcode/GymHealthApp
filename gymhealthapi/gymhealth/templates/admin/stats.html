@@ -261,43 +261,44 @@
     });
 
     // Biểu đồ doanh thu theo tháng
-    const revenueCtx = document.getElementById('revenueChart').getContext('2d');
-    const revenueData = {{ stats.revenue_by_month|safe }};
-    const revenueLabels = revenueData.map(item => {
-        const date = new Date(item.month);
-        return date.getMonth() + 1 + '/' + date.getFullYear();
-    });
-    const revenueValues = revenueData.map(item => item.total);
+const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+const revenueLabels = [];
+const revenueValues = [];
 
-    new Chart(revenueCtx, {
-        type: 'line',
-        data: {
-            labels: revenueLabels,
-            datasets: [{
-                label: 'Doanh thu (VNĐ)',
-                data: revenueValues,
-                fill: false,
-                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                borderColor: 'rgba(75, 192, 192, 1)',
-                tension: 0.1
-            }]
+{% for item in stats.revenue_by_month %}
+revenueLabels.push("{{ item.month|date:'m/Y' }}");
+revenueValues.push({{ item.total|default:0 }});
+{% endfor %}
+
+new Chart(revenueCtx, {
+    type: 'line',
+    data: {
+        labels: revenueLabels,
+        datasets: [{
+            label: 'Doanh thu (VNĐ)',
+            data: revenueValues,
+            fill: false,
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            borderColor: 'rgba(75, 192, 192, 1)',
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            title: {
+                display: true,
+                text: 'Doanh thu theo tháng'
+            }
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                title: {
-                    display: true,
-                    text: 'Doanh thu theo tháng'
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
+        scales: {
+            y: {
+                beginAtZero: true
             }
         }
-    });
+    }
+});
 
     // Biểu đồ sử dụng theo ngày trong tuần
     const weekdayCtx = document.getElementById('weekdayChart').getContext('2d');

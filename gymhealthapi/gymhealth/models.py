@@ -254,6 +254,66 @@ class SubscriptionPackage(models.Model):
 
         super().save(*args, **kwargs)
 
+class Payment(models.Model):
+    PAYMENT_STATUS = (
+        ('pending', 'Chờ xác nhận'),
+        ('completed', 'Đã thanh toán'),
+        ('failed', 'Thất bại'),
+        ('refunded', 'Đã hoàn tiền'),
+    )
+
+    PAYMENT_METHOD = (
+        ('momo', 'MoMo'),
+        ('vnpay', 'VNPAY'),
+        ('bank_transfer', 'Chuyển khoản ngân hàng'),
+        ('cash', 'Tiền mặt'),
+        ('other', 'Khác'),
+    )
+
+    subscription = models.ForeignKey(SubscriptionPackage, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD)
+    status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='pending')
+    transaction_id = models.CharField(max_length=255, blank=True, null=True)
+    payment_date = models.DateTimeField(auto_now_add=True)
+    confirmed_date = models.DateTimeField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
+
+    # Thông tin bổ sung cho từng phương thức thanh toán
+    bank_name = models.CharField(max_length=100, blank=True, null=True)
+    account_name = models.CharField(max_length=100, blank=True, null=True)
+    account_number = models.CharField(max_length=50, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    #
+    vnpay_transaction_no = models.CharField(max_length=255, blank=True, null=True)  # VNPay Transaction Number
+
+    class Meta:
+        verbose_name = "Thanh toán"
+        verbose_name_plural = "Thanh toán"
+        ordering = ['-payment_date']
+
+    def __str__(self):
+        return f"Thanh toán {self.amount} - {self.get_payment_method_display()} - {self.get_status_display()}"
+
+
+class PaymentReceipt(models.Model):
+    payment = models.OneToOneField(Payment, on_delete=models.CASCADE, related_name='receipt')
+    receipt_image = models.ImageField(upload_to='receipts/', verbose_name="Ảnh biên lai")
+    upload_date = models.DateTimeField(auto_now_add=True)
+    verified = models.BooleanField(default=False)
+    verified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='verified_receipts')
+    verification_date = models.DateTimeField(blank=True, null=True)
+    notes = RichTextField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Biên lai thanh toán"
+        verbose_name_plural = "Biên lai thanh toán"
+
+    def __str__(self):
+        return f"Biên lai cho {self.payment}"
 
 #
 # Lịch tập
@@ -495,64 +555,6 @@ class Promotion(models.Model):
         )
 
 
-class Payment(models.Model):
-    PAYMENT_STATUS = (
-        ('pending', 'Chờ xác nhận'),
-        ('completed', 'Đã thanh toán'),
-        ('failed', 'Thất bại'),
-        ('refunded', 'Đã hoàn tiền'),
-    )
-
-    PAYMENT_METHOD = (
-        ('momo', 'MoMo'),
-        ('vnpay', 'VNPAY'),
-        ('bank_transfer', 'Chuyển khoản ngân hàng'),
-        ('cash', 'Tiền mặt'),
-        ('other', 'Khác'),
-    )
-
-    subscription = models.ForeignKey(SubscriptionPackage, on_delete=models.CASCADE, related_name='payments')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD)
-    status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='pending')
-    transaction_id = models.CharField(max_length=255, blank=True, null=True)
-    payment_date = models.DateTimeField(auto_now_add=True)
-    confirmed_date = models.DateTimeField(blank=True, null=True)
-    notes = RichTextField(blank=True, null=True)
-
-    # Thông tin bổ sung cho từng phương thức thanh toán
-    bank_name = models.CharField(max_length=100, blank=True, null=True)
-    account_name = models.CharField(max_length=100, blank=True, null=True)
-    account_number = models.CharField(max_length=50, blank=True, null=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Thanh toán"
-        verbose_name_plural = "Thanh toán"
-        ordering = ['-payment_date']
-
-    def __str__(self):
-        return f"Thanh toán {self.amount} - {self.get_payment_method_display()} - {self.get_status_display()}"
-
-
-class PaymentReceipt(models.Model):
-    payment = models.OneToOneField(Payment, on_delete=models.CASCADE, related_name='receipt')
-    receipt_image = models.ImageField(upload_to='receipts/', verbose_name="Ảnh biên lai")
-    upload_date = models.DateTimeField(auto_now_add=True)
-    verified = models.BooleanField(default=False)
-    verified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
-                                    related_name='verified_receipts')
-    verification_date = models.DateTimeField(blank=True, null=True)
-    notes = RichTextField(blank=True, null=True)
-
-    class Meta:
-        verbose_name = "Biên lai thanh toán"
-        verbose_name_plural = "Biên lai thanh toán"
-
-    def __str__(self):
-        return f"Biên lai cho {self.payment}"
 
 
 class BaseRating(models.Model):

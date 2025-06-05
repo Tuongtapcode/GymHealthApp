@@ -25,6 +25,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import PackageDetail from "./PackageDetail";
 import CurrentPackageView from "./CurrentPackageView";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import PaymentMethodModal from "./PaymentMethodModal"; // Import modal
 
 const Packages = ({ navigation }) => {
   const [packages, setPackages] = useState([]);
@@ -38,6 +39,11 @@ const Packages = ({ navigation }) => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedPackageId, setSelectedPackageId] = useState(null);
   // State cho thông tin gói tập hiện tại của user
+  // Thêm state quản lý modal và package được chọn
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
+  const [selectedPackageInfo, setSelectedPackageInfo] = useState(null);
+  // ...existing code...
+
   const [subscriptionActiveLoading, setSubscriptionActiveLoading] =
     useState(true);
   const [subscriptionActiveError, setSubscriptionActiveError] = useState(null);
@@ -393,203 +399,414 @@ const Packages = ({ navigation }) => {
 
     fetchPackages(params);
   };
+  // Hàm xử lý đăng ký gói với phương thức thanh toán được chọn
+  // Sửa lỗi trong hàm processRegistration - Package.js
 
-  const handleRegister = async (packageId, package_name) => {
-    console.log(`Register for package ${packageId}`);
-    // Kiểm tra xem người dùng đã đăng nhập chưa
-    if (!isLoggedIn) {
-      // Nếu chưa đăng nhập, chuyển đến màn hình đăng nhập
-      navigation.navigate("Login", { returnTo: "Packages", packageId });
-    } else {
-      // Nếu đã đăng nhập, xử lý đăng ký gói
-      try {
-        // Hiển thị confirm dialog trước khi đăng ký
-        Alert.alert(
-          "Xác nhận đăng ký",
-          `Bạn có chắc chắn muốn đăng ký gói tập "${package_name}" không?`,
-          [
-            {
-              text: "Hủy",
-              style: "cancel",
-            },
-            {
-              text: "Đăng ký",
-              onPress: async () => {
-                try {
-                  // Hiển thị loading
-                  setLoading(true);
+  const processRegistration = async (
+    packageId,
+    package_name,
+    package_price,
+    paymentMethod,
+    bankCode = null
+  ) => {
+    try {
+      setLoading(true);
+      const accessToken = await AsyncStorage.getItem("accessToken");
 
-                  // Lấy access token từ AsyncStorage
-                  const accessToken = await AsyncStorage.getItem("accessToken");
-                  console.log("Access Token for registration:", accessToken);
-                  if (!accessToken) {
-                    throw new Error("Không tìm thấy token đăng nhập");
-                  }
+      if (!accessToken) {
+        throw new Error("Không tìm thấy token đăng nhập");
+      }
 
-                  // Gọi API đăng ký gói tập
-                  console.log(
-                    "Requesting registration URL:",
-                    endpoints.subscription + "register/"
-                  );
-                  const response = await axiosInstance.post(
-                    endpoints.subscription + "register/",
-                    { package: packageId },
-                    {
-                      headers: {
-                        Authorization: `Bearer ${accessToken}`,
-                      },
-                    }
-                  );
+      // Kiểm tra và chuyển đổi giá
+      console.log("Original package_price:", package_price);
+      console.log("Type of package_price:", typeof package_price);
 
-                  console.log("Registration response:", response.data);
+      const amount = Number(package_price);
+      console.log("Converted amount:", amount);
 
-                  // Lấy subscription_id từ response
-                  const subscriptionId = response.data.subscription.id; // Giả sử API trả về id của subscription
-                  console.log("Created subscription ID:", subscriptionId);
-
-                  // Tắt loading sau khi đăng ký ban đầu
-                  setLoading(false);
-
-                  // Hiển thị dialog xác nhận thanh toán
-                  Alert.alert(
-                    "Xác nhận thanh toán",
-                    "Vui lòng xác nhận thanh toán để hoàn tất đăng ký gói tập",
-                    [
-                      {
-                        text: "Hủy",
-                        style: "cancel",
-                        onPress: () => {
-                          console.log("Thanh toán bị hủy");
-                        },
-                      },
-                      {
-                        text: "Xác nhận thanh toán",
-                        onPress: async () => {
-                          try {
-                            // Hiển thị loading khi xác nhận thanh toán
-                            setLoading(true);
-
-                            // Gọi API xác nhận thanh toán với subscription ID
-                            console.log(
-                              "Requesting payment verification URL:",
-                              endpoints.verifyPayment.replace(
-                                "{subscriptionId}",
-                                subscriptionId
-                              )
-                            );
-
-                            const verifyResponse = await axiosInstance.post(
-                              endpoints.verifyPayment.replace(
-                                "{subscriptionId}",
-                                subscriptionId
-                              ), // Thay thế {subscriptionId} bằng giá trị thực tế
-                              {},
-                              {
-                                headers: {
-                                  Authorization: `Bearer ${accessToken}`,
-                                },
-                              }
-                            );
-                            console.log(
-                              "Payment verification response:",
-                              verifyResponse.data
-                            );
-
-                            // Tắt loading
-                            setLoading(false);
-
-                            // Hiển thị thông báo thành công
-                            Alert.alert(
-                              "Đăng ký thành công",
-                              "Bạn đã đăng ký và thanh toán gói tập thành công!",
-                              [
-                                {
-                                  text: "OK",
-                                  onPress: () => {
-                                    // Làm mới dữ liệu đăng ký và gói tập
-                                    fetchSubscription();
-                                    fetchPackages();
-                                  },
-                                },
-                              ]
-                            );
-                          } catch (error) {
-                            // Tắt loading
-                            setLoading(false);
-
-                            console.error("Error verifying payment:", error);
-
-                            // Hiển thị thông báo lỗi
-                            let errorMessage =
-                              "Đã xảy ra lỗi khi xác nhận thanh toán";
-
-                            if (error.response) {
-                              console.log("Server error:", error.response.data);
-
-                              if (error.response.status === 400) {
-                                if (error.response.data.detail) {
-                                  errorMessage = error.response.data.detail;
-                                } else if (error.response.data.message) {
-                                  errorMessage = error.response.data.message;
-                                }
-                              } else if (error.response.status === 403) {
-                                errorMessage =
-                                  "Bạn không có quyền thực hiện hành động này";
-                              } else if (error.response.status === 404) {
-                                errorMessage = "Không tìm thấy gói tập";
-                              }
-                            }
-
-                            Alert.alert("Lỗi thanh toán", errorMessage);
-                          }
-                        },
-                      },
-                    ]
-                  );
-                } catch (error) {
-                  // Tắt loading
-                  setLoading(false);
-
-                  console.error("Error registering package:", error);
-
-                  // Hiển thị thông báo lỗi
-                  let errorMessage = "Đã xảy ra lỗi khi đăng ký gói tập";
-
-                  if (error.response) {
-                    // Nếu server trả về lỗi
-                    console.log("Server error:", error.response.data);
-
-                    // Kiểm tra các trường hợp lỗi cụ thể từ server
-                    if (error.response.status === 400) {
-                      // Xử lý các mã lỗi cụ thể từ server
-                      if (error.response.data.detail) {
-                        errorMessage = error.response.data.detail;
-                      } else if (error.response.data.message) {
-                        errorMessage = error.response.data.message;
-                      }
-                    } else if (error.response.status === 403) {
-                      errorMessage =
-                        "Bạn không có quyền thực hiện hành động này";
-                    } else if (error.response.status === 404) {
-                      errorMessage = "Không tìm thấy gói tập";
-                    }
-                  }
-
-                  Alert.alert("Lỗi", errorMessage);
-                }
-              },
-            },
-          ]
-        );
-      } catch (error) {
-        console.error("Error in registration process:", error);
+      if (!amount || amount < 1000) {
         Alert.alert(
           "Lỗi",
-          "Đã xảy ra lỗi không xác định. Vui lòng thử lại sau."
+          "Giá gói tập không hợp lệ. Giá tối thiểu là 1,000 VND."
         );
+        return;
       }
+
+      // Bước 1: Đăng ký gói tập
+      console.log("Đăng ký gói tập...");
+      const registrationResponse = await axiosInstance.post(
+        endpoints.subscription + "register/",
+        { package: packageId },
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      console.log("Registration response:", registrationResponse.data);
+
+      if (
+        !registrationResponse.data ||
+        !registrationResponse.data.subscription
+      ) {
+        throw new Error("Phản hồi đăng ký không hợp lệ");
+      }
+
+      const subscriptionId = registrationResponse.data.subscription.id;
+      console.log("Created subscription ID:", subscriptionId);
+
+      if (!subscriptionId) {
+        throw new Error("Không nhận được ID subscription");
+      }
+
+      // Bước 2: Tạo thanh toán theo phương thức đã chọn
+      console.log(`Tạo thanh toán ${paymentMethod.toUpperCase()}...`);
+
+      const paymentPayload = {
+        subscription_id: subscriptionId,
+        amount: amount,
+        order_info: `Thanh toan goi tap ${package_name}`, // Loại bỏ ký tự đặc biệt
+      };
+
+      // *** SỬA LỖI: Xử lý bank_code cho VNPay ***
+      if (paymentMethod === "vnpay") {
+        // Chỉ thêm bank_code nếu người dùng đã chọn ngân hàng cụ thể
+        if (bankCode && bankCode !== "" && bankCode !== "ALL") {
+          // Mapping bank codes to VNPay compatible codes
+          const bankCodeMap = {
+            VIETCOMBANK: "VCB",
+            TECHCOMBANK: "TCB",
+            BIDV: "BIDV",
+            AGRIBANK: "AGRI",
+            MBBANK: "MB",
+            ACB: "ACB",
+            VIETINBANK: "CTG",
+            SACOMBANK: "STB",
+            NCB: "NCB",
+            SCB: "SCB",
+            EXIMBANK: "EIB",
+            MSBANK: "MSB",
+            NAMABANK: "NAB",
+            VNMART: "VNMART",
+            HDBANK: "HDB",
+            SHB: "SHB",
+            ABBANK: "ABB",
+            OCB: "OCB",
+            BACABANK: "BAB",
+            VPBANK: "VPB",
+            VIB: "VIB",
+            DONGABANK: "DAB",
+            TPBANK: "TPB",
+            OJB: "OJB",
+            SEABANK: "SEAB",
+            UOB: "UOB",
+            PBVN: "PBVN",
+            GPBANK: "GPB",
+            ANZ: "ANZ",
+            HSBC: "HSBC",
+            DB: "DB",
+            SHINHAN: "SHINHAN",
+            MIRAE: "MIRAE",
+            CIMB: "CIMB",
+            KEB: "KEB",
+            CBBANK: "CBB",
+            KIENLONGBANK: "KLB",
+            IVB: "IVB",
+          };
+
+          const shortBankCode = bankCodeMap[bankCode] || bankCode;
+          paymentPayload.bank_code = shortBankCode;
+
+          console.log(`Bank code mapping: ${bankCode} -> ${shortBankCode}`);
+        }
+        // Nếu không chọn ngân hàng cụ thể, không gửi bank_code
+        else {
+          console.log("No specific bank selected, sending without bank_code");
+        }
+      }
+
+      console.log("Payment payload:", paymentPayload);
+
+      // Chọn endpoint dựa trên phương thức thanh toán
+      const paymentEndpoint =
+        paymentMethod === "vnpay"
+          ? endpoints.createVNPayPayment
+          : endpoints.createMomoPayment;
+
+      const paymentResponse = await axiosInstance.post(
+        paymentEndpoint,
+        paymentPayload,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 30000, // Tăng timeout lên 30 giây
+        }
+      );
+
+      console.log("Payment response:", paymentResponse.data);
+
+      if (paymentResponse.data) {
+        const responseData = paymentResponse.data;
+
+        // Kiểm tra có URL thanh toán không
+        if (responseData.payment_url) {
+          const paymentMethodName =
+            paymentMethod === "vnpay" ? "VNPay" : "MoMo";
+
+          // *** SỬA LỖI: Kiểm tra URL hợp lệ trước khi chuyển hướng ***
+          if (!responseData.payment_url.includes("Error.html")) {
+            Alert.alert(
+              "Thanh toán",
+              `Chuyển hướng đến trang thanh toán ${paymentMethodName}`,
+              [
+                {
+                  text: "OK",
+                  onPress: () => {
+                    console.log("Payment URL:", responseData.payment_url);
+                    console.log("Payment ID:", responseData.payment_id);
+                    console.log(
+                      "Order ID:",
+                      responseData.order_id || responseData.payment_id
+                    );
+
+                    // Navigate đến màn hình thanh toán
+                    navigation.navigate("Payment", {
+                      paymentUrl: responseData.payment_url,
+                      subscriptionId: subscriptionId,
+                      packageName: package_name,
+                      paymentId: responseData.payment_id,
+                      orderId: responseData.order_id || responseData.payment_id,
+                      amount: responseData.amount || amount,
+                      paymentMethod: paymentMethod,
+                      bankCode: bankCode,
+                    });
+                  },
+                },
+              ]
+            );
+          } else {
+            // URL chứa lỗi, không chuyển hướng
+            throw new Error(
+              "URL thanh toán không hợp lệ. Vui lòng kiểm tra thông tin thanh toán."
+            );
+          }
+        }
+        // Kiểm tra thanh toán thành công ngay lập tức
+        else if (
+          responseData.message &&
+          responseData.message.includes("thành công")
+        ) {
+          Alert.alert("Thành công", responseData.message, [
+            {
+              text: "OK",
+              onPress: () => {
+                fetchActiveSubscription();
+                fetchSubscription(1);
+                fetchPackages();
+              },
+            },
+          ]);
+        } else if (responseData.success === true) {
+          Alert.alert("Thành công", "Đăng ký gói tập thành công!", [
+            {
+              text: "OK",
+              onPress: () => {
+                fetchActiveSubscription();
+                fetchSubscription(1);
+                fetchPackages();
+              },
+            },
+          ]);
+        } else if (responseData.error) {
+          throw new Error(responseData.error);
+        } else {
+          throw new Error(
+            "Phản hồi từ server không như mong đợi. Vui lòng thử lại."
+          );
+        }
+      } else {
+        throw new Error("Không nhận được phản hồi từ server");
+      }
+    } catch (error) {
+      console.error("Error in processRegistration:", error);
+
+      let errorMessage =
+        "Đã xảy ra lỗi trong quá trình đăng ký. Vui lòng thử lại sau.";
+
+      if (error.response) {
+        console.log("Server error response:", error.response.data);
+        console.log("Server error status:", error.response.status);
+
+        if (error.response.data && error.response.data.error) {
+          errorMessage = error.response.data.error;
+        } else if (error.response.data && error.response.data.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.response.data && error.response.data.detail) {
+          errorMessage = error.response.data.detail;
+        } else if (error.response.status === 400) {
+          errorMessage =
+            "Dữ liệu không hợp lệ. Vui lòng kiểm tra lại thông tin thanh toán.";
+        } else if (error.response.status === 401) {
+          errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+          navigation.navigate("Login");
+          return;
+        } else if (error.response.status === 403) {
+          errorMessage = "Bạn không có quyền thực hiện hành động này.";
+        } else if (error.response.status >= 500) {
+          errorMessage = "Lỗi server. Vui lòng thử lại sau.";
+        }
+      } else if (error.request) {
+        console.log("Network error:", error.request);
+        errorMessage =
+          "Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      Alert.alert("Lỗi đăng ký", errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }; // Hàm xử lý khi user chọn phương thức thanh toán
+  const handlePaymentMethodSelected = (paymentInfo) => {
+    setShowPaymentMethodModal(false);
+
+    if (selectedPackage) {
+      processRegistration(
+        selectedPackage.id,
+        selectedPackage.name,
+        selectedPackage.price,
+        paymentInfo.method,
+        paymentInfo.bankCode
+      );
     }
   };
+
+  // Hàm chính để handle đăng ký - mở modal chọn phương thức thanh toán
+  const handleRegister = async (packageId, package_name, package_price) => {
+    console.log(`Register for package ${packageId}`);
+    console.log("Package details:", { packageId, package_name, package_price });
+
+    if (!isLoggedIn) {
+      navigation.navigate("Login", { returnTo: "Packages", packageId });
+      return;
+    }
+
+    try {
+      const priceText = (package_price ?? 0).toLocaleString();
+
+      Alert.alert(
+        "Xác nhận đăng ký",
+        `Bạn có chắc chắn muốn đăng ký gói tập "${package_name}" với giá ${priceText} VND không?`,
+        [
+          {
+            text: "Hủy",
+            style: "cancel",
+          },
+          {
+            text: "Tiếp tục",
+            onPress: () => {
+              // Lưu thông tin package và mở modal chọn phương thức thanh toán
+              setSelectedPackageInfo({
+                id: packageId,
+                name: package_name,
+                price: package_price ?? 0,
+              });
+              setShowPaymentMethodModal(true);
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error("Error in registration process:", error);
+      Alert.alert("Lỗi", "Đã xảy ra lỗi không xác định. Vui lòng thử lại sau.");
+    }
+  };
+
+  // Hàm xử lý khi người dùng chọn phương thức thanh toán
+  const handleSelectPaymentMethod = async (paymentInfo) => {
+    console.log("Selected payment method:", paymentInfo);
+
+    // Đóng modal chọn phương thức thanh toán
+    setShowPaymentMethodModal(false);
+
+    if (!selectedPackageInfo) {
+      Alert.alert("Lỗi", "Không tìm thấy thông tin gói tập. Vui lòng thử lại.");
+      return;
+    }
+
+    const { method, bankCode } = paymentInfo;
+    const { id, name, price } = selectedPackageInfo;
+
+    // Hiển thị dialog xác nhận
+    const paymentMethodText = method === "vnpay" ? "VNPay" : "MoMo";
+    const bankText =
+      method === "vnpay" && bankCode ? ` qua ${getBankName(bankCode)}` : "";
+
+    Alert.alert(
+      "Xác nhận thanh toán",
+      `Bạn có chắc chắn muốn thanh toán gói tập "${name}" với giá ${price.toLocaleString(
+        "vi-VN"
+      )} VND qua ${paymentMethodText}${bankText} không?`,
+      [
+        {
+          text: "Hủy",
+          style: "cancel",
+        },
+        {
+          text: "Thanh toán",
+          onPress: () => processRegistration(id, name, price, method, bankCode),
+        },
+      ]
+    );
+  };
+
+  // Hàm helper để lấy tên ngân hàng
+  const getBankName = (bankCode) => {
+    const bankNames = {
+      VCB: "Vietcombank", // VIETCOMBANK -> VCB (11 chars -> 3 chars)
+      TCB: "Techcombank", // TECHCOMBANK -> TCB (11 chars -> 3 chars)
+      BIDV: "BIDV", // BIDV -> BIDV (4 chars - OK)
+      AGRIBANK: "Agribank", // AGRIBANK -> AGRIBANK (9 chars - OK)
+      MB: "MB Bank", // MBBANK -> MB (6 chars -> 2 chars)
+      ACB: "ACB", // ACB -> ACB (3 chars - OK)
+      CTG: "VietinBank", // VIETINBANK -> CTG (10 chars -> 3 chars)
+      STB: "Sacombank", // SACOMBANK -> STB (9 chars -> 3 chars)
+      NCB: "NCB", // NCB -> NCB (3 chars - OK)
+      SCB: "SCB", // SCB -> SCB (3 chars - OK)
+      EIB: "Eximbank", // EXIMBANK -> EIB (8 chars -> 3 chars)
+      MSB: "MSBank", // MSBANK -> MSB (6 chars -> 3 chars)
+      NAB: "Nam A Bank", // NAMABANK -> NAB (8 chars -> 3 chars)
+      VNMART: "VnMart", // VNMART -> VNMART (6 chars - OK)
+      HDB: "HDBank", // HDBANK -> HDB (6 chars -> 3 chars)
+      SHB: "SHB", // SHB -> SHB (3 chars - OK)
+      ABB: "ABBank", // ABBANK -> ABB (6 chars -> 3 chars)
+      OCB: "OCB", // OCB -> OCB (3 chars - OK)
+      BAB: "Bac A Bank", // BACABANK -> BAB (8 chars -> 3 chars)
+      VPB: "VPBank", // VPBANK -> VPB (6 chars -> 3 chars)
+      VIB: "VIB", // VIB -> VIB (3 chars - OK)
+      DAB: "Dong A Bank", // DONGABANK -> DAB (9 chars -> 3 chars)
+      TPB: "TPBank", // TPBANK -> TPB (6 chars -> 3 chars)
+      OJB: "OceanBank", // OJB -> OJB (3 chars - OK)
+      SEAB: "SeABank", // SEABANK -> SEAB (7 chars -> 4 chars)
+      UOB: "UOB", // UOB -> UOB (3 chars - OK)
+      PBVN: "Public Bank Vietnam", // PBVN -> PBVN (4 chars - OK)
+      GPB: "GPBank", // GPBANK -> GPB (6 chars -> 3 chars)
+      ANZ: "ANZ Vietnam", // ANZ -> ANZ (3 chars - OK)
+      HSBC: "HSBC Vietnam", // HSBC -> HSBC (4 chars - OK)
+      DB: "Deutsche Bank", // DB -> DB (2 chars - OK)
+      SHINHAN: "Shinhan Bank", // SHINHAN -> SHINHAN (7 chars - OK)
+      MIRAE: "Mirae Asset", // MIRAE -> MIRAE (5 chars - OK)
+      CIMB: "CIMB Bank", // CIMB -> CIMB (4 chars - OK)
+      KEB: "KEB Hana Bank", // KEB -> KEB (3 chars - OK)
+      CBB: "CB Bank", // CBBANK -> CBB (6 chars -> 3 chars)
+      KLB: "Kien Long Bank", // KIENLONGBANK -> KLB (12 chars -> 3 chars)
+      IVB: "IndoVinaBank", // IVB -> IVB (3 chars - OK)
+    };
+    return bankNames[bankCode] || bankCode;
+  };
+
   // Handle view details - Mở modal chi tiết
   const handleViewDetails = (packageId) => {
     console.log(`View details for package ${packageId}`);
@@ -683,7 +900,7 @@ const Packages = ({ navigation }) => {
         <Button
           mode="contained"
           style={styles.btn}
-          onPress={() => handleRegister(item.id, item.name)}
+          onPress={() => handleRegister(item.id, item.name, item.price)}
         >
           Đăng ký
         </Button>
@@ -1245,13 +1462,13 @@ const Packages = ({ navigation }) => {
         //   {/* <PaperText variant="titleMedium" style={styles.sectionTitle}>
         //     Các gói tập khác
         //   </PaperText> */}
-         
+
         // </View>
-         <Text style={styles.historyTitle}>
-            {" "}
-            <Icon name="package-variant" size={20} color="#333" />
-            Các gói tập khác
-          </Text>
+        <Text style={styles.historyTitle}>
+          {" "}
+          <Icon name="package-variant" size={20} color="#333" />
+          Các gói tập khác
+        </Text>
       )}
 
       <Searchbar
@@ -1331,6 +1548,14 @@ const Packages = ({ navigation }) => {
           onRegister={handleRegister}
         />
       )}
+      {/* Modal chọn phương thức thanh toán */}
+      <PaymentMethodModal
+        visible={showPaymentMethodModal}
+        onClose={() => setShowPaymentMethodModal(false)}
+        onSelectPayment={handleSelectPaymentMethod}
+        packageInfo={selectedPackageInfo}
+      />
+      {/* ...existing code... */}
     </SafeAreaView>
   );
 };

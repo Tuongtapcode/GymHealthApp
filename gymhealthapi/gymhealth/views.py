@@ -1,6 +1,7 @@
 from datetime import date, timedelta, datetime
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
+from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -9,11 +10,13 @@ from gymhealth import serializers, perms, paginators
 from rest_framework import viewsets, generics, permissions, status, request, parsers, permissions, filters, mixins
 from gymhealth.models import User, HealthInfo, Packages, Benefit, PackageType, WorkoutSession, MemberProfile, \
     TrainerProfile, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
-    FeedbackResponse
+    FeedbackResponse, Payment, PaymentReceipt
 from gymhealth.perms import IsOwner, IsProfileOwnerOrManager
 from gymhealth.serializers import TrainerProfileSerializer, MemberProfileSerializer, BenefitSerializer, \
     PackageTypeSerializer, PackageSerializer, PackageDetailSerializer, TrainerListSerializer, SubscriptionPackage
 from django.db.models import Min, Max, Q, Count
+
+from gymhealth.utils.vnpay_payment import VNPayUtils
 
 
 class UserViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
@@ -600,7 +603,120 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
         # Kiểm tra quyền truy cập
         self.check_object_permissions(self.request, obj)
         return obj
+    @action(detail=False, methods=['post'], url_path='register',
+            permission_classes=[permissions.IsAuthenticated, perms.IsMember])
+    def register_package(self, request):
+        """API cho người dùng đăng ký gói tập"""
 
+        # Thêm thông tin member vào data
+        data = request.data.copy()
+        data['member'] = request.user.id
+
+        # Kiểm tra gói tập
+        package_id = data.get('package')
+        if not package_id:
+            return Response({"error": "Vui lòng chọn gói tập"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            package = Packages.objects.get(id=package_id, active=True)
+        except Packages.DoesNotExist:
+            return Response({"error": "Gói tập không tồn tại hoặc không còn hiệu lực"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Xử lý remaining_pt_sessions
+        data['remaining_pt_sessions'] = package.pt_sessions
+
+        # Xử lý start_date
+        start_date_str = data.get('start_date')
+        if not start_date_str:
+            start_date = date.today()
+            data['start_date'] = start_date.isoformat()
+        else:
+            try:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": "Định dạng start_date không hợp lệ, phải là YYYY-MM-DD"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        # Lấy số tháng từ package_type
+        duration_months = package.package_type.duration_months
+        if duration_months:
+            # Tính end_date
+            year = start_date.year + (start_date.month - 1 + duration_months) // 12
+            month = (start_date.month - 1 + duration_months) % 12 + 1
+            day = start_date.day
+
+            # Xử lý ngày không hợp lệ
+            try:
+                end_date = date(year, month, day)
+            except ValueError:
+                next_month = date(year, month, 1) + timedelta(days=31)
+                last_day_of_month = (next_month.replace(day=1) - timedelta(days=1)).day
+                end_date = date(year, month, last_day_of_month)
+
+            data['end_date'] = end_date.isoformat()
+        else:
+            return Response({"error": "Gói tập không có thời hạn (duration_months)"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Tạo và xác thực serializer
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        # Lưu đăng ký gói với trạng thái pending
+        subscription = serializer.save()
+
+        return Response(
+            {"message": f"Đăng ký gói tập {package.name} thành công. Vui lòng thanh toán để kích hoạt gói.",
+             "subscription": serializer.data},
+            status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=['post'], url_path='verify-payment',
+            permission_classes=[permissions.IsAuthenticated, perms.IsManager])
+    def verify_payment(self, request, pk=None):
+        """Xác nhận thanh toán từ Manager"""
+        subscription = self.get_object()
+
+        if subscription.status != 'pending':
+            return Response({"error": "Chỉ có thể xác nhận thanh toán cho gói đăng ký đang chờ xử lý"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Cập nhật trạng thái
+        subscription.status = 'active'
+        subscription.save()
+
+        # Cập nhật hồ sơ thành viên với logic xử lý nhiều gói tập
+        try:
+            member_profile = subscription.member.member_profile
+
+            # So sánh và cập nhật ngày kết thúc nếu gói hiện tại có thời hạn lâu hơn
+            if (not member_profile.membership_end_date or
+                    subscription.end_date > member_profile.membership_end_date):
+                member_profile.membership_end_date = subscription.end_date
+
+            member_profile.is_active = True
+            member_profile.save()
+
+        except MemberProfile.DoesNotExist:
+            # Tạo mới MemberProfile nếu chưa tồn tại
+            MemberProfile.objects.create(
+                user=subscription.member,
+                membership_end_date=subscription.end_date,
+                is_active=True
+            )
+
+        # Thông báo cho hội viên
+        Notification.objects.create(
+            user=subscription.member,
+            title="Thanh toán đã được xác nhận",
+            message=f"Gói tập {subscription.package.name} của bạn đã được kích hoạt và có thể sử dụng.",
+            notification_type="payment_confirmation",
+            related_object_id=subscription.id
+        )
+
+        return Response({"message": "Đã xác nhận thanh toán và kích hoạt gói thành công"})
     @action(detail=False, methods=['get'], url_path='my', url_name='my-subscriptions',
             permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def my_subscriptions(self, request):
@@ -646,74 +762,6 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
         serializer = self.get_serializer(subscription)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='register',
-            permission_classes=[permissions.IsAuthenticated, perms.IsMember])
-    def register_package(self, request):
-        """API cho người dùng đăng ký gói tập"""
-
-        # Thêm thông tin member vào data
-        data = request.data.copy()
-        data['member'] = request.user.id
-
-        # Kiểm tra gói tập
-        package_id = data.get('package')
-        if not package_id:
-            return Response({"error": "Vui lòng chọn gói tập"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            package = Packages.objects.get(id=package_id, active=True)
-        except Packages.DoesNotExist:
-            return Response({"error": "Gói tập không tồn tại hoặc không còn hiệu lực"},
-                            status=status.HTTP_400_BAD_REQUEST)
-        # Xử lý remaining_pt_sessions
-        data['remaining_pt_sessions'] = package.pt_sessions
-        # Xử lý start_date
-        start_date_str = data.get('start_date')
-        if not start_date_str:
-            start_date = date.today()
-            data['start_date'] = start_date.isoformat()
-        else:
-            try:
-                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-            except ValueError:
-                return Response({"error": "Định dạng start_date không hợp lệ, phải là YYYY-MM-DD"},
-                                status=status.HTTP_400_BAD_REQUEST)
-
-        # Lấy số tháng từ package_type
-        duration_months = package.package_type.duration_months
-        if duration_months:
-            # Tính end_date
-            year = start_date.year + (start_date.month - 1 + duration_months) // 12
-            month = (start_date.month - 1 + duration_months) % 12 + 1
-            day = start_date.day
-
-            # Xử lý ngày không hợp lệ (ví dụ: 31/1 + 1 tháng -> 28/2 hoặc 29/2)
-            try:
-                end_date = date(year, month, day)
-            except ValueError:
-                # Nếu ngày không tồn tại, chọn ngày cuối cùng của tháng
-                next_month = date(year, month, 1) + timedelta(days=31)
-                last_day_of_month = (next_month.replace(day=1) - timedelta(days=1)).day
-                end_date = date(year, month, last_day_of_month)
-
-            data['end_date'] = end_date.isoformat()
-        else:
-            return Response({"error": "Gói tập không có thời hạn (duration_months)"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # Tạo và xác thực serializer
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-
-        # Lưu đăng ký gói
-        subscription = serializer.save()
-
-        return Response(
-            {"message": f"Đăng ký gói tập {package.name} thành công",
-             "subscription": serializer.data},
-            status=status.HTTP_201_CREATED
-        )
 
     @action(detail=True, methods=['post'], url_path='cancel',
             permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
@@ -742,39 +790,6 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
 
         return Response({"message": "Đã hủy gói đăng ký thành công"})
 
-    @action(detail=True, methods=['post'], url_path='verify-payment',
-            permission_classes=[permissions.IsAuthenticated, perms.IsManager])
-    def verify_payment(self, request, pk=None):
-        """Xác nhận thanh toán từ Manager"""
-        subscription = self.get_object()
-
-        if subscription.status != 'pending':
-            return Response({"error": "Chỉ có thể xác nhận thanh toán cho gói đăng ký đang chờ xử lý"},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # Cập nhật trạng thái
-        subscription.status = 'active'
-        subscription.save()
-
-        # Cập nhật hồ sơ thành viên
-        try:
-            member_profile = subscription.member.member_profile
-            member_profile.membership_end_date = subscription.end_date
-            member_profile.is_active = True
-            member_profile.save()
-        except MemberProfile.DoesNotExist:
-            pass
-
-        # Thông báo cho hội viên
-        Notification.objects.create(
-            user=subscription.member,
-            title="Thanh toán đã được xác nhận",
-            message=f"Gói tập {subscription.package.name} của bạn đã được kích hoạt và có thể sử dụng.",
-            notification_type="payment_confirmation",
-            related_object_id=subscription.id
-        )
-
-        return Response({"message": "Đã xác nhận thanh toán và kích hoạt gói thành công"})
 
 
 class WorkoutSessionViewSet(viewsets.ViewSet):
@@ -2137,3 +2152,1149 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
         }
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+import logging
+import hmac
+import hashlib
+import requests
+import json
+import uuid
+from datetime import datetime
+from django.conf import settings
+from django.utils import timezone
+from django.http import JsonResponse, HttpResponse, HttpResponseRedirect
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+
+logger = logging.getLogger(__name__)
+
+
+class MoMoPaymentService:
+    """Service class để xử lý thanh toán MoMo"""
+
+    @staticmethod
+    def create_signature(raw_signature):
+        """Tạo chữ ký HMAC SHA256 - Fixed encoding issue"""
+        secret_key = settings.MOMO_CONFIG['SECRET_KEY']
+
+        # Fix: Sử dụng UTF-8 encoding thay vì ASCII
+        h = hmac.new(
+            secret_key.encode('utf-8'),
+            raw_signature.encode('utf-8'),
+            hashlib.sha256
+        )
+        return h.hexdigest()
+
+    @staticmethod
+    def create_payment_url(amount, order_id, order_info, extra_data=""):
+        """Tạo URL thanh toán MoMo"""
+        config = settings.MOMO_CONFIG
+        request_id = str(uuid.uuid4())
+
+        # Fix: Đảm bảo order_info được xử lý đúng với Unicode
+        order_info = str(order_info).strip()
+
+        # Tạo raw signature
+        raw_signature = (
+            f"accessKey={config['ACCESS_KEY']}"
+            f"&amount={amount}"
+            f"&extraData={extra_data}"
+            f"&ipnUrl={config['IPN_URL']}"
+            f"&orderId={order_id}"
+            f"&orderInfo={order_info}"
+            f"&partnerCode={config['PARTNER_CODE']}"
+            f"&redirectUrl={config['REDIRECT_URL']}"
+            f"&requestId={request_id}"
+            f"&requestType={config['REQUEST_TYPE']}"
+        )
+
+        signature = MoMoPaymentService.create_signature(raw_signature)
+
+        # Dữ liệu gửi đến MoMo
+        data = {
+            'partnerCode': config['PARTNER_CODE'],
+            'orderId': order_id,
+            'partnerName': config['PARTNER_NAME'],
+            'storeId': config['STORE_ID'],
+            'ipnUrl': config['IPN_URL'],
+            'amount': str(amount),
+            'lang': config['LANG'],
+            'requestType': config['REQUEST_TYPE'],
+            'redirectUrl': config['REDIRECT_URL'],
+            'autoCapture': config['AUTO_CAPTURE'],
+            'orderInfo': order_info,
+            'requestId': request_id,
+            'extraData': extra_data,
+            'signature': signature,
+            'orderGroupId': ""
+        }
+
+        try:
+            # Fix: Đảm bảo request được gửi với UTF-8 encoding
+            response = requests.post(
+                config['ENDPOINT'],
+                json=data,
+                headers={
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'application/json'
+                },
+                timeout=30
+            )
+
+            # Log để debug
+            logger.info(f"MoMo request data: {json.dumps(data, ensure_ascii=False)}")
+            logger.info(f"MoMo response: {response.text}")
+
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"MoMo API error: {str(e)}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"MoMo JSON decode error: {str(e)}")
+            return None
+
+
+class PaymentViewSet(viewsets.ViewSet):
+    """ViewSet để quản lý thanh toán"""
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        """Lấy danh sách thanh toán của user"""
+        payments = Payment.objects.filter(
+            subscription__member=request.user
+        ).select_related('subscription', 'subscription__package')
+
+        serializer = serializers.PaymentSerializer(payments, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Lấy chi tiết một thanh toán"""
+        try:
+            payment = Payment.objects.select_related(
+                'subscription', 'subscription__package', 'subscription__member'
+            ).get(id=pk, subscription__member=request.user)
+
+            serializer = serializers.PaymentSerializer(payment)
+            return Response(serializer.data)
+        except Payment.DoesNotExist:
+            return Response(
+                {"error": "Thanh toán không tồn tại"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=False, methods=['get'], url_path='debug')
+    def debug_payments(self, request):
+        """Debug payment records"""
+        if not request.user.is_superuser:
+            return Response({'error': 'Permission denied'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Lấy các payment gần đây
+        recent_payments = Payment.objects.filter(
+            payment_method='vnpay'
+        ).order_by('-created_at')[:10]
+
+        debug_data = []
+        for payment in recent_payments:
+            debug_data.append({
+                'id': payment.id,
+                'transaction_id': payment.transaction_id,
+                'status': payment.status,
+                'amount': payment.amount,
+                'created_at': payment.created_at,
+                'user': payment.subscription.member.username,
+                'subscription_id': payment.subscription.id
+            })
+
+        return Response({'payments': debug_data})
+
+    @action(detail=False, methods=['post'], url_path='cancel-pending')
+    def cancel_pending_payments(self, request):
+        """Cancel expired pending payments"""
+        if not request.user.is_superuser:
+            return Response({'error': 'Permission denied'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Cancel payments older than 15 minutes
+        expired_time = timezone.now() - timedelta(minutes=15)
+        expired_payments = Payment.objects.filter(
+            status='pending',
+            payment_method='vnpay',
+            created_at__lt=expired_time
+        )
+
+        count = expired_payments.count()
+        expired_payments.update(status='expired')
+
+        return Response({
+            'message': f'Cancelled {count} expired payments'
+        })
+    @action(detail=False, methods=['post'], url_path='vnpay/create')
+    def create_vnpay_payment(self, request):
+        """
+        Tạo thanh toán VNPay thông qua ViewSet
+        """
+        view = CreateVNPayPaymentView()
+        return view.post(request)
+
+    @action(detail=True, methods=['get'], url_path='vnpay/status')
+    def check_vnpay_status(self, request, pk=None):
+        """
+        Kiểm tra trạng thái thanh toán VNPay
+        """
+        try:
+            payment = self.get_object()
+
+            if payment.payment_method != 'vnpay':
+                return Response(
+                    {'error': 'This is not a VNPay payment'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Có thể query trạng thái từ VNPay nếu cần
+            vnpay = VNPayUtils()
+
+            return Response({
+                'payment_id': payment.id,
+                'status': payment.status,
+                'transaction_id': payment.transaction_id,
+                'amount': payment.amount,
+                'payment_date': payment.payment_date,
+                'confirmed_date': payment.confirmed_date
+            })
+
+        except Exception as e:
+            logger.error(f"Error checking VNPay status: {str(e)}")
+            return Response(
+                {'error': 'Failed to check payment status'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'])
+    def create_momo_payment(self, request):
+        """Tạo thanh toán MoMo - Fixed encoding"""
+        serializer = serializers.CreateMoMoPaymentSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            subscription = SubscriptionPackage.objects.get(
+                id=serializer.validated_data['subscription_id'],
+                member=request.user
+            )
+
+            # Tạo order ID unique
+            order_id = f"GYM_{subscription.id}_{int(datetime.now().timestamp())}"
+            amount = int(serializer.validated_data['amount'])
+
+            # Fix: Xử lý order_info với Unicode
+            order_info = str(serializer.validated_data['order_info']).strip()
+
+            # Log để debug
+            logger.info(f"Creating MoMo payment - Order info: {order_info}")
+            logger.info(f"Order info type: {type(order_info)}")
+
+            # Tạo payment record
+            payment = Payment.objects.create(
+                subscription=subscription,
+                amount=serializer.validated_data['amount'],
+                payment_method='momo',
+                status='pending',
+                transaction_id=order_id,
+                notes=order_info
+            )
+
+            # Gọi MoMo API
+            momo_response = MoMoPaymentService.create_payment_url(
+                amount=amount,
+                order_id=order_id,
+                order_info=order_info,
+                extra_data=json.dumps({"payment_id": payment.id}, ensure_ascii=False)
+            )
+
+            if momo_response and momo_response.get('resultCode') == 0:
+                return Response({
+                    'payment_id': payment.id,
+                    'payment_url': momo_response.get('payUrl'),
+                    'order_id': order_id,
+                    'amount': amount,
+                    'message': 'Tạo thanh toán thành công'
+                })
+            else:
+                payment.status = 'failed'
+                payment.save()
+
+                error_message = 'Không thể tạo thanh toán MoMo'
+                if momo_response:
+                    error_message += f" - Mã lỗi: {momo_response.get('resultCode', 'Unknown')}"
+                    if 'message' in momo_response:
+                        error_message += f" - {momo_response['message']}"
+
+                return Response({
+                    'error': error_message,
+                    'details': momo_response
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except SubscriptionPackage.DoesNotExist:
+            return Response(
+                {"error": "Gói tập không tồn tại hoặc không thuộc về bạn"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Create MoMo payment error: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+            return Response(
+                {"error": "Có lỗi xảy ra khi tạo thanh toán"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MoMoIPNView(APIView):
+    """Xử lý IPN (Instant Payment Notification) từ MoMo"""
+    permission_classes = []
+
+    def post(self, request):
+        """Xử lý callback từ MoMo sau khi thanh toán"""
+        try:
+            data = request.data
+            logger.info(f"MoMo IPN received: {data}")
+
+            # Validate signature
+            config = settings.MOMO_CONFIG
+            raw_signature = (
+                f"accessKey={config['ACCESS_KEY']}"
+                f"&amount={data.get('amount', '')}"
+                f"&extraData={data.get('extraData', '')}"
+                f"&message={data.get('message', '')}"
+                f"&orderId={data.get('orderId', '')}"
+                f"&orderInfo={data.get('orderInfo', '')}"
+                f"&orderType={data.get('orderType', '')}"
+                f"&partnerCode={data.get('partnerCode', '')}"
+                f"&payType={data.get('payType', '')}"
+                f"&requestId={data.get('requestId', '')}"
+                f"&responseTime={data.get('responseTime', '')}"
+                f"&resultCode={data.get('resultCode', '')}"
+                f"&transId={data.get('transId', '')}"
+            )
+
+            expected_signature = MoMoPaymentService.create_signature(raw_signature)
+            received_signature = data.get('signature', '')
+
+            if expected_signature != received_signature:
+                logger.error("Invalid MoMo signature")
+                return JsonResponse({"status": "error", "message": "Invalid signature"})
+
+            # Tìm payment record
+            order_id = data.get('orderId')
+            try:
+                payment = Payment.objects.get(transaction_id=order_id)
+            except Payment.DoesNotExist:
+                logger.error(f"Payment not found for order_id: {order_id}")
+                return JsonResponse({"status": "error", "message": "Payment not found"})
+
+            # Cập nhật trạng thái thanh toán
+            result_code = data.get('resultCode')
+            if result_code == 0:  # Thành công
+                payment.status = 'completed'
+                payment.confirmed_date = timezone.now()
+                payment.transaction_id = data.get('transId', order_id)
+
+                # Cập nhật trạng thái subscription
+                subscription = payment.subscription
+                subscription.status = 'active'
+                subscription.save()
+
+                # Cập nhật hồ sơ thành viên với logic xử lý nhiều gói tập
+                try:
+                    member_profile = subscription.member.member_profile
+
+                    # So sánh và cập nhật ngày kết thúc nếu gói hiện tại có thời hạn lâu hơn
+                    if (not member_profile.membership_end_date or
+                            subscription.end_date > member_profile.membership_end_date):
+                        member_profile.membership_end_date = subscription.end_date
+
+                    member_profile.is_active = True
+                    member_profile.save()
+
+                except MemberProfile.DoesNotExist:
+                    # Tạo mới MemberProfile nếu chưa tồn tại
+                    MemberProfile.objects.create(
+                        user=subscription.member,
+                        membership_end_date=subscription.end_date,
+                        is_active=True
+                    )
+
+                # Thông báo cho hội viên
+                try:
+                    Notification.objects.create(
+                        user=subscription.member,
+                        title="Thanh toán MoMo thành công",
+                        message=f"Thanh toán cho gói tập {subscription.package.name} đã được xác nhận. Gói tập của bạn đã được kích hoạt.",
+                        notification_type="payment_confirmation",
+                        related_object_id=subscription.id
+                    )
+                except Exception as notification_error:
+                    logger.error(f"Failed to create notification: {notification_error}")
+
+                logger.info(f"Payment {payment.id} completed successfully via MoMo")
+            else:  # Thất bại
+                payment.status = 'failed'
+                logger.info(f"Payment {payment.id} failed with code: {result_code}")
+
+            payment.notes = f"MoMo response: {data.get('message', '')}"
+            payment.save()
+
+            return JsonResponse({"status": "success"})
+
+        except Exception as e:
+            logger.error(f"MoMo IPN error: {str(e)}")
+            return JsonResponse({"status": "error", "message": str(e)})
+@method_decorator(csrf_exempt, name='dispatch')
+class MoMoReturnView(APIView):
+    """Xử lý redirect từ MoMo sau khi user thanh toán xong"""
+    permission_classes = []
+
+    def get(self, request):
+        """Xử lý return URL từ MoMo"""
+        order_id = request.GET.get('orderId')
+        result_code = request.GET.get('resultCode')
+
+        try:
+            payment = Payment.objects.get(transaction_id=order_id)
+
+            if result_code == '0':
+                message = "Thanh toán thành công!"
+                payment_status = "completed"
+            else:
+                message = "Thanh toán thất bại!"
+                payment_status = "failed"
+
+            # Redirect về frontend với thông tin
+            frontend_url = f"https://c11e-171-231-61-11.ngrok-free.app/payment-result?status={payment_status}&message={message}&payment_id={payment.id}"
+
+            return JsonResponse({
+                "status": payment_status,
+                "message": message,
+                "payment_id": payment.id,
+                "redirect_url": frontend_url
+            })
+
+        except Payment.DoesNotExist:
+            return JsonResponse({
+                "status": "error",
+                "message": "Không tìm thấy thông tin thanh toán"
+            })
+
+class PaymentReceiptViewSet(viewsets.ViewSet):
+    """ViewSet để quản lý biên lai thanh toán"""
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        """Lấy danh sách biên lai của user"""
+        receipts = PaymentReceipt.objects.filter(
+            payment__subscription__member=request.user
+        ).select_related('payment', 'verified_by')
+
+        serializer = serializers.PaymentReceiptSerializer(receipts, many=True)
+        return Response(serializer.data)
+
+    def create(self, request):
+        """Upload biên lai thanh toán"""
+        serializer = serializers.PaymentReceiptSerializer(data=request.data)
+
+        if serializer.is_valid():
+            # Kiểm tra payment có thuộc về user không
+            payment_id = serializer.validated_data['payment'].id
+            try:
+                payment = Payment.objects.get(
+                    id=payment_id,
+                    subscription__member=request.user
+                )
+
+                receipt = serializer.save()
+                return Response(
+                    serializer.PaymentReceiptSerializer(receipt).data,
+                    status=status.HTTP_201_CREATED
+                )
+            except Payment.DoesNotExist:
+                return Response(
+                    {"error": "Thanh toán không tồn tại hoặc không thuộc về bạn"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+from django.db import transaction
+from decimal import Decimal
+
+class CreateVNPayPaymentView(APIView):
+    """
+    API tạo thanh toán VNPay - Fixed version
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            serializer = serializers.CreateVNPayPaymentSerializer(data=request.data)
+            if not serializer.is_valid():
+                logger.error(f"Invalid VNPay data: {serializer.errors}")
+                return Response(
+                    {'error': 'Dữ liệu không hợp lệ', 'details': serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Lấy và validate dữ liệu
+            subscription_id = serializer.validated_data['subscription_id']
+            amount = serializer.validated_data['amount']
+            order_info = serializer.validated_data['order_info']
+            bank_code = serializer.validated_data.get('bank_code')
+
+            # Validate amount
+            try:
+                amount_decimal = Decimal(str(amount))
+                if amount_decimal < Decimal('1000'):
+                    return Response(
+                        {'error': 'Số tiền tối thiểu là 1,000 VND'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                if amount_decimal > Decimal('100000000'):
+                    return Response(
+                        {'error': 'Số tiền không được vượt quá 100,000,000 VND'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'Số tiền không hợp lệ'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Lấy và validate subscription
+            try:
+                subscription = SubscriptionPackage.objects.get(
+                    id=subscription_id,
+                    member=request.user
+                )
+            except SubscriptionPackage.DoesNotExist:
+                return Response(
+                    {'error': 'Gói tập không tồn tại hoặc không thuộc về bạn'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Kiểm tra xem đã có payment pending cho subscription này chưa
+            existing_pending = Payment.objects.filter(
+                subscription=subscription,
+                payment_method='vnpay',
+                status='pending'
+            ).first()
+
+            if existing_pending:
+                # Hủy payment cũ nếu đã quá 15 phút
+                if existing_pending.created_at < timezone.now() - timedelta(minutes=15):
+                    existing_pending.status = 'expired'
+                    existing_pending.save()
+                else:
+                    return Response(
+                        {
+                            'error': 'Đã có giao dịch đang chờ xử lý cho gói tập này',
+                            'payment_id': existing_pending.id
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Validate và làm sạch order_info
+            if not order_info or len(order_info.strip()) < 5:
+                order_info = f"Thanh toan goi tap {subscription.package.name}"
+
+            # Làm sạch order_info (VNPay không cho phép ký tự đặc biệt)
+            import re
+            # Chỉ giữ lại chữ cái, số, khoảng trắng và dấu gạch ngang
+            order_info = re.sub(r'[^\w\s-]', '', order_info.strip())
+            # Giới hạn độ dài
+            order_info = order_info[:200] if len(order_info) > 200 else order_info
+            # Đảm bảo không rỗng
+            if not order_info:
+                order_info = f"Thanh toan goi tap"
+
+            # Validate bank_code
+            if bank_code:
+                valid_bank_codes = [
+                    'VCB', 'TCB', 'BIDV', 'AGRI', 'MB', 'ACB', 'CTG', 'STB',
+                    'NCB', 'SCB', 'EIB', 'MSB', 'NAB', 'VNMART', 'HDB', 'SHB',
+                    'ABB', 'OCB', 'BAB', 'VPB', 'VIB', 'DAB', 'TPB', 'OJB',
+                    'SEAB', 'UOB', 'PBVN', 'GPB', 'ANZ', 'HSBC', 'DB',
+                    'SHINHAN', 'MIRAE', 'CIMB', 'KEB', 'CBB', 'KLB', 'IVB'
+                ]
+
+                if bank_code not in valid_bank_codes:
+                    logger.warning(f"Invalid bank code: {bank_code}")
+                    bank_code = None
+
+            # ✅ SỬA: Tạo order_id không có ký tự đặc biệt (VNPay loại bỏ dấu gạch dưới)
+            unique_suffix = str(int(datetime.now().timestamp() * 1000))  # millisecond timestamp
+            temp_order_id = f"{subscription.id}{unique_suffix}"  # Bỏ dấu gạch dưới
+
+            # Tạo payment record với transaction_id unique
+            with transaction.atomic():
+                payment = Payment.objects.create(
+                    subscription=subscription,
+                    amount=amount_decimal,
+                    payment_method='vnpay',
+                    status='pending',
+                    transaction_id=temp_order_id,  # Sử dụng unique ID
+                    notes=f"VNPay payment: {order_info}"
+                )
+
+                # Khởi tạo VNPay utils
+                vnpay = VNPayUtils()
+
+                # Lấy IP client
+                ip_addr = vnpay.get_client_ip(request)
+
+                # Log thông tin debug
+                logger.info(f"Creating VNPay payment:")
+                logger.info(f"- Payment ID: {payment.id}")
+                logger.info(f"- Order ID (transaction_id): {payment.transaction_id}")
+                logger.info(f"- Amount: {amount_decimal}")
+                logger.info(f"- Order Info: '{order_info}'")
+                logger.info(f"- Bank Code: {bank_code}")
+                logger.info(f"- IP Address: {ip_addr}")
+
+                # Tạo URL thanh toán với transaction_id thay vì payment.id
+                try:
+                    payment_url = vnpay.create_payment_url(
+                        order_id=payment.transaction_id,  # Sử dụng transaction_id
+                        amount=float(amount_decimal),
+                        order_desc=order_info,
+                        ip_addr=ip_addr,
+                        bank_code=bank_code
+                    )
+
+                    logger.info(f"VNPay payment URL created successfully for payment {payment.id}")
+
+                except Exception as vnpay_error:
+                    logger.error(f"VNPay URL creation failed: {str(vnpay_error)}")
+                    logger.error(f"VNPay error details:", exc_info=True)
+
+                    payment.status = 'failed'
+                    payment.notes = f"URL creation failed: {str(vnpay_error)}"
+                    payment.save()
+
+                    return Response(
+                        {'error': 'Không thể tạo URL thanh toán', 'details': str(vnpay_error)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+
+                return Response({
+                    'payment_id': payment.id,
+                    'order_id': payment.transaction_id,  # Return transaction_id as order_id
+                    'payment_url': payment_url,
+                    'amount': float(amount_decimal),
+                    'order_info': order_info,
+                    'bank_code': bank_code,
+                    'message': 'URL thanh toán đã được tạo thành công'
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Unexpected error in VNPay payment creation: {str(e)}")
+            logger.error(f"Error traceback:", exc_info=True)
+
+            return Response(
+                {
+                    'error': 'Có lỗi xảy ra khi tạo thanh toán',
+                    'details': 'Vui lòng thử lại sau'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class VNPayIPNView(APIView):
+    def post(self, request):
+        print("=== VNPay IPN View Called ===")
+        print("Request data:", request.data)
+        print("Request headers:", request.headers)
+        try:
+            # Chuyển đổi dữ liệu đầu vào
+            ipn_data = {}
+            for key, value in request.data.items():
+                if isinstance(value, list):
+                    ipn_data[key] = value[0]
+                else:
+                    ipn_data[key] = value
+
+            logger.info(f"Processed IPN data: {ipn_data}")
+
+            serializer = serializers.VNPayIPNSerializer(data=ipn_data)
+            if not serializer.is_valid():
+                logger.error(f"Invalid VNPay IPN data: {serializer.errors}")
+                return HttpResponse("02", content_type="text/plain")
+
+            vnpay = VNPayUtils()
+            is_valid, message = vnpay.validate_response(ipn_data)
+
+            logger.info(f"IPN Signature validation: {is_valid}, message: {message}")
+
+            if not is_valid:
+                logger.error(f"Invalid VNPay IPN signature: {message}")
+                return HttpResponse("97", content_type="text/plain")
+
+            order_id = serializer.validated_data['vnp_TxnRef']
+            amount = serializer.validated_data['vnp_Amount']
+            response_code = serializer.validated_data['vnp_ResponseCode']
+            transaction_no = serializer.validated_data['vnp_TransactionNo']
+
+            logger.info(f"IPN Order ID: {order_id}, Amount: {amount}, Response Code: {response_code}")
+
+            # ✅ SỬA LỖI: VNPay có thể loại bỏ ký tự đặc biệt từ vnp_TxnRef
+            try:
+                # Thử tìm chính xác trước
+                payment = Payment.objects.get(transaction_id=order_id)
+                logger.info(f"IPN Found payment: {payment.id}, status: {payment.status}")
+            except Payment.DoesNotExist:
+                # Nếu không tìm thấy, thử tìm với các pattern khác
+                logger.warning(f"Payment with exact transaction_id {order_id} not found, trying alternatives...")
+
+                # Thử tìm payments gần đây có pattern tương tự
+                recent_payments = Payment.objects.filter(
+                    payment_method='vnpay',
+                    status='pending',
+                    created_at__gte=timezone.now() - timedelta(minutes=30)
+                )
+                import re
+                payment = None
+                for p in recent_payments:
+                    # Thử so sánh sau khi loại bỏ ký tự đặc biệt
+                    clean_transaction_id = re.sub(r'[^0-9]', '', p.transaction_id or '')
+                    clean_order_id = re.sub(r'[^0-9]', '', str(order_id))
+
+                    logger.info(f"Comparing: DB='{clean_transaction_id}' vs IPN='{clean_order_id}'")
+
+                    if clean_transaction_id == clean_order_id:
+                        payment = p
+                        logger.info(f"Found matching payment by pattern: {p.id}")
+                        break
+
+                if not payment:
+                    logger.error(f"IPN Payment with transaction_id {order_id} not found even with alternatives")
+                    # Log tất cả payments gần đây để debug
+                    for p in recent_payments:
+                        logger.error(f"Available payment: ID={p.id}, transaction_id='{p.transaction_id}'")
+                    return HttpResponse("01", content_type="text/plain")
+
+            # Kiểm tra số tiền (VNPay trả về số tiền x100)
+            vnpay_amount = float(amount) / 100
+            if float(payment.amount) != vnpay_amount:
+                logger.error(f"IPN Amount mismatch: expected {payment.amount}, got {vnpay_amount}")
+                return HttpResponse("04", content_type="text/plain")
+
+            # ✅ QUAN TRỌNG: Không ghi đè transaction_id nữa!
+            # Xử lý thành công
+            if response_code == '00' and payment.status == 'pending':
+                logger.info("IPN Processing successful payment...")
+                with transaction.atomic():
+                    payment.status = 'completed'
+                    payment.confirmed_date = timezone.now()
+                    # ✅ Lưu VNPay transaction number vào trường riêng
+                    payment.vnpay_transaction_no = transaction_no
+                    payment.save()
+
+                    subscription = payment.subscription
+                    subscription.status = 'active'
+                    subscription.save()
+
+                    # Cập nhật member profile (similar to return view)
+                    try:
+                        member_profile = subscription.member.member_profile
+                        if (not member_profile.membership_end_date or
+                                subscription.end_date > member_profile.membership_end_date):
+                            member_profile.membership_end_date = subscription.end_date
+                        member_profile.is_active = True
+                        member_profile.save()
+                    except MemberProfile.DoesNotExist:
+                        MemberProfile.objects.create(
+                            user=subscription.member,
+                            membership_end_date=subscription.end_date,
+                            is_active=True
+                        )
+
+                    # Tạo thông báo
+                    Notification.objects.create(
+                        user=subscription.member,
+                        title="Thanh toán thành công (IPN)",
+                        message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
+                        notification_type="payment_success"
+                    )
+
+                logger.info(f"IPN: Payment {payment.id} completed successfully")
+                return HttpResponse("00", content_type="text/plain")
+            else:
+                logger.warning(
+                    f"IPN Payment failed or not pending. Response code: {response_code}, Status: {payment.status}")
+                if payment.status == 'pending':  # Chỉ update nếu vẫn đang pending
+                    payment.status = 'failed'
+                    payment.save()
+                return HttpResponse("00", content_type="text/plain")
+
+        except Exception as e:
+            logger.error(f"Error processing VNPay IPN: {str(e)}", exc_info=True)
+            return HttpResponse("99", content_type="text/plain")
+#
+# class CreateVNPayPaymentView(APIView):
+#     """
+#     API tạo thanh toán VNPay - Modified for testing
+#     """
+#     permission_classes = [IsAuthenticated]
+#
+#     def post(self, request):
+#         try:
+#             serializer = serializers.CreateVNPayPaymentSerializer(data=request.data)
+#             if not serializer.is_valid():
+#                 logger.error(f"Invalid VNPay data: {serializer.errors}")
+#                 return Response(
+#                     {'error': 'Dữ liệu không hợp lệ', 'details': serializer.errors},
+#                     status=status.HTTP_400_BAD_REQUEST
+#                 )
+#
+#             # Lấy và validate dữ liệu
+#             subscription_id = serializer.validated_data['subscription_id']
+#             amount = serializer.validated_data['amount']
+#             order_info = serializer.validated_data['order_info']
+#             bank_code = serializer.validated_data.get('bank_code')
+#
+#             # Validate amount
+#             try:
+#                 amount_decimal = Decimal(str(amount))
+#                 if amount_decimal < Decimal('1000'):
+#                     return Response(
+#                         {'error': 'Số tiền tối thiểu là 1,000 VND'},
+#                         status=status.HTTP_400_BAD_REQUEST
+#                     )
+#                 if amount_decimal > Decimal('100000000'):
+#                     return Response(
+#                         {'error': 'Số tiền không được vượt quá 100,000,000 VND'},
+#                         status=status.HTTP_400_BAD_REQUEST
+#                     )
+#             except (ValueError, TypeError):
+#                 return Response(
+#                     {'error': 'Số tiền không hợp lệ'},
+#                     status=status.HTTP_400_BAD_REQUEST
+#                 )
+#
+#             # Lấy và validate subscription
+#             try:
+#                 subscription = SubscriptionPackage.objects.get(
+#                     id=subscription_id,
+#                     member=request.user
+#                 )
+#             except SubscriptionPackage.DoesNotExist:
+#                 return Response(
+#                     {'error': 'Gói tập không tồn tại hoặc không thuộc về bạn'},
+#                     status=status.HTTP_404_NOT_FOUND
+#                 )
+#
+#             # Kiểm tra xem đã có payment pending cho subscription này chưa
+#             existing_pending = Payment.objects.filter(
+#                 subscription=subscription,
+#                 payment_method='vnpay',
+#                 status='pending'
+#             ).first()
+#
+#             if existing_pending:
+#                 # Hủy payment cũ nếu đã quá 15 phút
+#                 if existing_pending.created_at < timezone.now() - timedelta(minutes=15):
+#                     existing_pending.status = 'expired'
+#                     existing_pending.save()
+#                 else:
+#                     return Response(
+#                         {
+#                             'error': 'Đã có giao dịch đang chờ xử lý cho gói tập này',
+#                             'payment_id': existing_pending.id
+#                         },
+#                         status=status.HTTP_400_BAD_REQUEST
+#                     )
+#
+#             # Validate và làm sạch order_info
+#             if not order_info or len(order_info.strip()) < 5:
+#                 order_info = f"Thanh toan goi tap {subscription.package.name}"
+#             import re
+#             order_info = re.sub(r'[^\w\s-]', '', order_info.strip())
+#             order_info = order_info[:200] if len(order_info) > 200 else order_info
+#             if not order_info:
+#                 order_info = f"Thanh toan goi tap"
+#
+#             # Validate bank_code
+#             if bank_code:
+#                 valid_bank_codes = [
+#                     'VCB', 'TCB', 'BIDV', 'AGRI', 'MB', 'ACB', 'CTG', 'STB',
+#                     'NCB', 'SCB', 'EIB', 'MSB', 'NAB', 'VNMART', 'HDB', 'SHB',
+#                     'ABB', 'OCB', 'BAB', 'VPB', 'VIB', 'DAB', 'TPB', 'OJB',
+#                     'SEAB', 'UOB', 'PBVN', 'GPB', 'ANZ', 'HSBC', 'DB',
+#                     'SHINHAN', 'MIRAE', 'CIMB', 'KEB', 'CBB', 'KLB', 'IVB'
+#                 ]
+#                 if bank_code not in valid_bank_codes:
+#                     logger.warning(f"Invalid bank code: {bank_code}")
+#                     bank_code = None
+#
+#             # Tạo unique order_id
+#             unique_suffix = str(int(datetime.now().timestamp() * 1000))
+#             temp_order_id = f"{subscription.id}_{unique_suffix}"
+#
+#             # Tạo payment record và cập nhật trạng thái ngay lập tức
+#             with transaction.atomic():
+#                 payment = Payment.objects.create(
+#                     subscription=subscription,
+#                     amount=amount_decimal,
+#                     payment_method='vnpay',
+#                     status='completed',  # Đặt ngay thành completed
+#                     transaction_id=temp_order_id,
+#                     notes=f"VNPay payment: {order_info}",
+#                     confirmed_date=timezone.now()  # Đặt ngày xác nhận
+#                 )
+#
+#                 # Kích hoạt subscription
+#                 subscription.status = 'active'
+#                 subscription.save()
+#
+#                 # Cập nhật member profile
+#                 try:
+#                     member_profile = subscription.member.member_profile
+#                     if (not member_profile.membership_end_date or
+#                             subscription.end_date > member_profile.membership_end_date):
+#                         member_profile.membership_end_date = subscription.end_date
+#                     member_profile.is_active = True
+#                     member_profile.save()
+#                 except MemberProfile.DoesNotExist:
+#                     MemberProfile.objects.create(
+#                         user=subscription.member,
+#                         membership_end_date=subscription.end_date,
+#                         is_active=True
+#                     )
+#
+#                 # Tạo thông báo
+#                 Notification.objects.create(
+#                     user=subscription.member,
+#                     title="Thanh toán thành công (Test Mode)",
+#                     message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất (test mode)",
+#                     notification_type="payment_success"
+#                 )
+#
+#                 # Khởi tạo VNPay utils (vẫn tạo URL để giữ flow)
+#                 vnpay = VNPayUtils()
+#                 ip_addr = vnpay.get_client_ip(request)
+#
+#                 logger.info(f"Creating VNPay payment:")
+#                 logger.info(f"- Payment ID: {payment.id}")
+#                 logger.info(f"- Order ID (transaction_id): {payment.transaction_id}")
+#                 logger.info(f"- Amount: {amount_decimal}")
+#                 logger.info(f"- Order Info: '{order_info}'")
+#                 logger.info(f"- Bank Code: {bank_code}")
+#                 logger.info(f"- IP Address: {ip_addr}")
+#
+#                 # Tạo URL thanh toán (giữ nguyên để không phá vỡ flow)
+#                 try:
+#                     payment_url = vnpay.create_payment_url(
+#                         order_id=payment.transaction_id,
+#                         amount=float(amount_decimal),
+#                         order_desc=order_info,
+#                         ip_addr=ip_addr,
+#                         bank_code=bank_code
+#                     )
+#                     logger.info(f"VNPay payment URL created: {payment_url}")
+#                 except Exception as vnpay_error:
+#                     logger.error(f"VNPay URL creation failed: {str(vnpay_error)}")
+#                     payment_url = None  # Vẫn trả về response dù URL lỗi
+#
+#                 return Response({
+#                     'payment_id': payment.id,
+#                     'order_id': payment.transaction_id,
+#                     'payment_url': payment_url,
+#                     'amount': float(amount_decimal),
+#                     'order_info': order_info,
+#                     'bank_code': bank_code,
+#                     'message': 'Thanh toán đã được kích hoạt (test mode)'
+#                 }, status=status.HTTP_201_CREATED)
+#
+#         except Exception as e:
+#             logger.error(f"Unexpected error in VNPay payment creation: {str(e)}")
+#             return Response(
+#                 {
+#                     'error': 'Có lỗi xảy ra khi tạo thanh toán',
+#                     'details': 'Vui lòng thử lại sau'
+#                 },
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
+@method_decorator(csrf_exempt, name='dispatch')
+class VNPayReturnView(APIView):
+    def get(self, request):
+        # Debug log
+        logger.info("=== VNPay Return View Called ===")
+        logger.info(f"GET params: {dict(request.GET)}")
+
+        try:
+            # Chuyển đổi QueryDict thành dict thường
+            return_data = {}
+            for key, value in request.GET.items():
+                if isinstance(value, list):
+                    return_data[key] = value[0]
+                else:
+                    return_data[key] = value
+
+            logger.info(f"Processed return_data: {return_data}")
+
+            serializer = serializers.VNPayReturnSerializer(data=return_data)
+            if not serializer.is_valid():
+                logger.error(f"Invalid VNPay return data: {serializer.errors}")
+                return HttpResponseRedirect("/payment/failed?error=invalid_data")
+
+            vnpay = VNPayUtils()
+            is_valid, message = vnpay.validate_response(return_data)
+
+            logger.info(f"Signature validation: {is_valid}, message: {message}")
+
+            if not is_valid:
+                logger.error(f"Invalid VNPay signature: {message}")
+                return HttpResponseRedirect("/payment/failed?error=invalid_signature")
+
+            order_id = serializer.validated_data['vnp_TxnRef']
+            amount = serializer.validated_data['vnp_Amount']
+            response_code = serializer.validated_data['vnp_ResponseCode']
+            transaction_no = serializer.validated_data['vnp_TransactionNo']
+
+            logger.info(f"Order ID: {order_id}, Amount: {amount}, Response Code: {response_code}")
+
+            # SỬA LỖI: Dùng transaction_id thay vì id
+            try:
+                payment = Payment.objects.get(transaction_id=order_id)
+                logger.info(f"Found payment: {payment.id}, status: {payment.status}")
+            except Payment.DoesNotExist:
+                logger.error(f"Payment with transaction_id {order_id} not found")
+                return HttpResponseRedirect("/payment/failed?error=payment_not_found")
+
+            # Kiểm tra số tiền (VNPay trả về số tiền x100)
+            vnpay_amount = float(amount) / 100  # VNPay trả về amount x100
+            if float(payment.amount) != vnpay_amount:
+                logger.error(f"Amount mismatch: expected {payment.amount}, got {vnpay_amount}")
+                return HttpResponseRedirect("/payment/failed?error=amount_mismatch")
+
+            # Xử lý thành công
+            if response_code == '00' and payment.status == 'pending':
+                logger.info("Processing successful payment...")
+                with transaction.atomic():
+                    payment.status = 'completed'
+                    payment.transaction_id = transaction_no  # Cập nhật với transaction number từ VNPay
+                    payment.confirmed_date = timezone.now()
+                    payment.save()
+
+                    logger.info(f"Payment {payment.id} updated to completed")
+
+                    subscription = payment.subscription
+                    subscription.status = 'active'
+                    subscription.save()
+
+                    logger.info(f"Subscription {subscription.id} activated")
+
+                    # Cập nhật member profile
+                    try:
+                        member_profile = subscription.member.member_profile
+                        if (not member_profile.membership_end_date or
+                                subscription.end_date > member_profile.membership_end_date):
+                            member_profile.membership_end_date = subscription.end_date
+                        member_profile.is_active = True
+                        member_profile.save()
+                        logger.info(f"Member profile updated")
+                    except MemberProfile.DoesNotExist:
+                        MemberProfile.objects.create(
+                            user=subscription.member,
+                            membership_end_date=subscription.end_date,
+                            is_active=True
+                        )
+                        logger.info(f"New member profile created")
+
+                    # Tạo thông báo
+                    Notification.objects.create(
+                        user=subscription.member,
+                        title="Thanh toán thành công",
+                        message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
+                        notification_type="payment_success"
+                    )
+                    logger.info(f"Notification created")
+
+                logger.info("=== Payment processing completed successfully ===")
+                return HttpResponseRedirect("/payment/success")
+            else:
+                logger.warning(
+                    f"Payment failed or not pending. Response code: {response_code}, Status: {payment.status}")
+                payment.status = 'failed'
+                payment.save()
+                return HttpResponseRedirect(f"/payment/failed?error={response_code}")
+
+        except Exception as e:
+            logger.error(f"Error in VNPay return: {str(e)}", exc_info=True)
+            return HttpResponseRedirect("/payment/failed?error=system_error")
+
+
+from django.db import models
+
+class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
+    queryset = Notification.objects.all()
+    serializer_class = serializers.NotificationSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = paginators.ItemPaginator
+
+    @action(detail=False, methods=['get'])
+    def my(self, request):
+        """Chỉ trả về thông báo của user hiện tại"""
+        notifications = self.get_queryset().order_by('-created_at')
+        serializer = self.get_serializer(notifications, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def unread(self, request):
+        """Lấy danh sách thông báo chưa đọc"""
+        unread_notifications = self.get_queryset().filter(is_read=False)
+        serializer = self.get_serializer(unread_notifications, many=True)
+        return Response({
+            'count': unread_notifications.count(),
+            'results': serializer.data
+        })
+
+    @action(detail=True, methods=['patch'])
+    def mark_as_read(self, request, pk=None):
+        """Đánh dấu thông báo đã đọc"""
+        notification = self.get_object()
+        notification.is_read = True
+        notification.save()
+        return Response({'status': 'marked as read'})
+
+    @action(detail=False, methods=['post'])
+    def mark_all_as_read(self, request):
+        """Đánh dấu tất cả thông báo đã đọc"""
+        updated = self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({'status': f'marked {updated} notifications as read'})
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Thống kê thông báo"""
+        queryset = self.get_queryset()
+        stats = {
+            'total': queryset.count(),
+            'unread': queryset.filter(is_read=False).count(),
+            'today': queryset.filter(created_at__date=timezone.now().date()).count(),
+            'this_week': queryset.filter(
+                created_at__gte=timezone.now() - timedelta(days=7)
+            ).count()
+        }
+        return Response(stats)

@@ -17,40 +17,155 @@ import { useSelector } from "react-redux";
 import axiosInstance, { endpoints } from "../../configs/API";
 import { LineChart } from "react-native-chart-kit";
 
-const mockNotifications = [
-  {
-    id: "1",
-    message: "Lịch tập với PT vào lúc 18:00 hôm nay",
-    time: "2 giờ trước",
-    read: false,
-  },
-  {
-    id: "2",
-    message: "Gói tập của bạn sẽ hết hạn trong 7 ngày",
-    time: "1 ngày trước",
-    read: true,
-  },
-  {
-    id: "3",
-    message: "Khuyến mãi đặc biệt: Giảm 20% gói tập 1 năm",
-    time: "3 ngày trước",
-    read: true,
-  },
-];
+import AllNotificationsModal from "./AllNotificationsModal";
 
 const Home = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState("home");
   const [userPackage, setUserPackage] = useState(null);
-  const [notifications, setNotifications] = useState(mockNotifications);
+  // ...existing code...
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState(null);
+  // ...existing code...
   const [upcomingSchedule, setUpcomingSchedule] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [trainingProgress, setTrainingProgress] = useState([]);
   const [latestProgressRecord, setLatestProgressRecord] = useState(null);
   const [error, setError] = useState(null);
-
+  const [showAllNotificationsModal, setShowAllNotificationsModal] =
+    useState(false);
   // Lấy thông tin người dùng từ Redux store
   const userFromRedux = useSelector((state) => state.user);
+  const handleNotificationReadFromModal = (notificationId) => {
+    if (notificationId === "all") {
+      // Cập nhật tất cả thông báo thành đã đọc
+      setNotifications((prev) =>
+        prev.map((notif) => ({ ...notif, read: true }))
+      );
+    } else {
+      // Cập nhật thông báo cụ thể
+      setNotifications((prev) =>
+        prev.map((notif) =>
+          notif.id === notificationId.toString()
+            ? { ...notif, read: true }
+            : notif
+        )
+      );
+    }
+
+    // Refresh lại notifications để cập nhật unread count
+    fetchNotifications();
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      setNotificationsLoading(true);
+      setNotificationsError(null);
+
+      // Lấy access token từ AsyncStorage
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      console.log("Access Token for notifications:", accessToken);
+
+      if (!accessToken) {
+        console.log("No access token found");
+        throw new Error("Không tìm thấy token đăng nhập");
+      }
+
+      // Gọi API lấy thông báo của user hiện tại
+      console.log("Requesting URL:", endpoints.notifications + "my/");
+      const response = await axiosInstance.get(
+        endpoints.notifications + "my/",
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      // console.log("Notifications API response:", response.data);
+
+      if (response.data && Array.isArray(response.data)) {
+        // Chuyển đổi dữ liệu để phù hợp với giao diện
+        const formattedNotifications = response.data.map((notification) => ({
+          id: notification.id.toString(),
+          message: notification.message,
+          time: formatTimeAgo(notification.created_at),
+          read: notification.is_read,
+          type: notification.notification_type,
+          title: notification.title,
+          // Lưu dữ liệu gốc để sử dụng nếu cần
+          originalData: notification,
+        }));
+
+        setNotifications(formattedNotifications);
+      } else {
+        setNotifications([]);
+      }
+
+      setNotificationsLoading(false);
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      setNotificationsError("Không thể tải thông báo");
+      setNotificationsLoading(false);
+
+      // Fallback về dữ liệu mock nếu lỗi
+      setNotifications([]);
+    }
+  };
+  // Hàm định dạng thời gian "time ago"
+  const formatTimeAgo = (dateString) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInSeconds = Math.floor((now - date) / 1000);
+
+    if (diffInSeconds < 60) {
+      return "Vừa xong";
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes} phút trước`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours} giờ trước`;
+    } else if (diffInSeconds < 604800) {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days} ngày trước`;
+    } else if (diffInSeconds < 2592000) {
+      const weeks = Math.floor(diffInSeconds / 604800);
+      return `${weeks} tuần trước`;
+    } else {
+      const months = Math.floor(diffInSeconds / 2592000);
+      return `${months} tháng trước`;
+    }
+  };
+
+  // Hàm đánh dấu tất cả thông báo đã đọc
+  const markAllNotificationsAsRead = async () => {
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      if (!accessToken) return;
+
+      await axiosInstance.post(
+        `${endpoints.notifications}mark_all_as_read/`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      // Cập nhật state local
+      setNotifications((prev) =>
+        prev.map((notif) => ({ ...notif, read: true }))
+      );
+
+      Alert.alert("Thành công", "Đã đánh dấu tất cả thông báo đã đọc");
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      Alert.alert("Lỗi", "Không thể đánh dấu thông báo đã đọc");
+    }
+  };
 
   // Thay thế hàm fetchActiveSubscription hiện tại bằng đoạn code này
   const fetchActiveSubscription = async () => {
@@ -396,6 +511,7 @@ const Home = ({ navigation }) => {
         // Thử lấy thông tin từ Redux trước
         if (userFromRedux && userFromRedux.username) {
           setUserData(userFromRedux);
+          console.log("Redux user data:", userFromRedux);
           return;
         }
 
@@ -412,8 +528,9 @@ const Home = ({ navigation }) => {
 
     fetchUserData();
     fetchActiveSubscription();
-    fetchUpcomingSchedules(); // Thêm dòng này để gọi API lịch tập
+    fetchUpcomingSchedules();
     fetchTrainingProgress(); // Thêm dòng này để gọi API thông tin sức khỏe
+    fetchNotifications();
   }, [userFromRedux]);
 
   // Đếm số thông báo chưa đọc
@@ -979,41 +1096,88 @@ const Home = ({ navigation }) => {
     );
   };
 
-  // Component hiển thị thông báo
-  const NotificationsSection = () => (
-    <View style={styles.notificationsCard}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.cardTitle}>Thông báo</Text>
-        {unreadCount > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{unreadCount}</Text>
-          </View>
+  const NotificationsSection = () => {
+    if (notificationsLoading) {
+      return (
+        <View style={styles.notificationsCard}>
+          <Text style={{ textAlign: "center" }}>Đang tải thông báo...</Text>
+        </View>
+      );
+    }
+
+    if (notificationsError) {
+      return (
+        <View style={styles.notificationsCard}>
+          <Text style={styles.errorText}>{notificationsError}</Text>
+          <TouchableOpacity
+            style={[styles.buttonPrimary, { marginTop: 12 }]}
+            onPress={fetchNotifications}
+          >
+            <Text style={styles.buttonPrimaryText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.notificationsCard}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.cardTitle}>Thông báo</Text>
+          {unreadCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unreadCount}</Text>
+            </View>
+          )}
+        </View>
+
+        {notifications.length === 0 ? (
+          <Text style={{ textAlign: "center", color: "#888" }}>
+            Không có thông báo nào.
+          </Text>
+        ) : (
+          <>
+            {notifications.slice(0, 3).map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.notificationItem,
+                  !item.read && styles.unreadNotification,
+                ]}
+                onPress={() => markNotificationAsRead(item.id)}
+              >
+                <View style={styles.notificationContent}>
+                  <Text style={styles.notificationMessage}>
+                    {item.title || item.message}
+                  </Text>
+                  <Text style={styles.notificationTime}>{item.time}</Text>
+                </View>
+                {!item.read && <View style={styles.unreadDot} />}
+              </TouchableOpacity>
+            ))}
+
+            {unreadCount > 0 && (
+              <TouchableOpacity
+                style={[styles.buttonOutline, { marginTop: 8 }]}
+                onPress={markAllNotificationsAsRead}
+              >
+                <Text style={styles.buttonOutlineText}>
+                  Đánh dấu tất cả đã đọc
+                </Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
-      </View>
-      {notifications.slice(0, 3).map((item) => (
+
+        {/* Cập nhật nút "Xem tất cả" để mở modal thay vì navigate */}
         <TouchableOpacity
-          key={item.id}
-          style={[
-            styles.notificationItem,
-            !item.read && styles.unreadNotification,
-          ]}
-          onPress={() => Alert.alert("Đánh dấu đã đọc thông báo này")}
+          style={styles.buttonOutline}
+          onPress={() => setShowAllNotificationsModal(true)}
         >
-          <View style={styles.notificationContent}>
-            <Text style={styles.notificationMessage}>{item.message}</Text>
-            <Text style={styles.notificationTime}>{item.time}</Text>
-          </View>
-          {!item.read && <View style={styles.unreadDot} />}
+          <Text style={styles.buttonOutlineText}>Xem tất cả</Text>
         </TouchableOpacity>
-      ))}
-      <TouchableOpacity
-        style={styles.buttonOutline}
-        onPress={() => navigation.navigate("Notifications")}
-      >
-        <Text style={styles.buttonOutlineText}>Xem tất cả</Text>
-      </TouchableOpacity>
-    </View>
-  );
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1021,9 +1185,14 @@ const Home = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Image
-            source={{ uri: "/api/placeholder/40/40" }}
+            source={{
+              uri:
+                userData && userData.avatar
+                  ? userData.avatar
+                  : "/api/placeholder/40/40",
+            }}
             style={styles.avatar}
-          />
+          />  
           <View>
             <Text style={styles.welcomeText}>Xin chào,</Text>
             <Text style={styles.userName}>
@@ -1052,12 +1221,16 @@ const Home = ({ navigation }) => {
         <UpcomingSession />
         <ProgressSection />
         <NotificationsSection />
+        <AllNotificationsModal
+          visible={showAllNotificationsModal}
+          onClose={() => setShowAllNotificationsModal(false)}
+          onNotificationRead={handleNotificationReadFromModal}
+        />
         <View style={styles.spacer} />
       </ScrollView>
     </SafeAreaView>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,

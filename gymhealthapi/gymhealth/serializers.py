@@ -1,7 +1,8 @@
 from django.contrib.auth.password_validation import validate_password
 from django.db.models import FloatField
 from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanField, SerializerMethodField, DateField, \
-    IntegerField, TimeField, ReadOnlyField
+    IntegerField, TimeField, ReadOnlyField, DecimalField
+from rest_framework.relations import StringRelatedField
 
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from datetime import date, timedelta, datetime
@@ -485,7 +486,7 @@ class WorkoutSessionListScheduleSerializer(ModelSerializer):
 
     class Meta:
         model = WorkoutSession
-        fields = ['id', 'member_name', 'session_date', 'start_time', 'end_time',
+        fields = ['id','member_id','trainer_id', 'member_name', 'session_date', 'start_time', 'end_time',
                   'session_type', 'status', 'notes', 'created_at']
 
     def get_member_name(self, obj):
@@ -506,7 +507,7 @@ class TrainerAllSessionsSerializer(ModelSerializer):
     class Meta:
         model = WorkoutSession
         fields = [
-            'id', 'member_id','member_name', 'member_username', 'member_phone',
+            'id', 'member_id','trainer_id','member_name', 'member_username', 'member_phone',
             'session_date', 'start_time', 'end_time', 'session_duration',
             'session_type', 'status', 'notes', 'trainer_notes',
             'time_until_session', 'subscription_info',
@@ -940,3 +941,248 @@ class GymAverageRatingSerializer(ModelSerializer):
 
     def get_total_ratings(self, obj):
         return obj.ratings.count()
+
+
+from .models import Payment, SubscriptionPackage, PaymentReceipt
+from decimal import Decimal
+
+class CreateMoMoPaymentSerializer(Serializer):
+    subscription_id = IntegerField()
+    amount = DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('1000'))
+    order_info = CharField(max_length=255, default="Thanh toán gói tập gym")
+
+    def validate_subscription_id(self, value):
+        try:
+            subscription = SubscriptionPackage.objects.get(id=value)
+            if subscription.status not in ['pending']:
+                raise ValidationError("Gói tập này không thể thanh toán")
+            return value
+        except SubscriptionPackage.DoesNotExist:
+            raise ValidationError("Gói tập không tồn tại")
+
+
+class CreateVNPayPaymentSerializer(Serializer):
+    subscription_id = IntegerField()
+    amount = DecimalField(max_digits=10, decimal_places=0, min_value=1000)
+    order_info = CharField(max_length=255)
+    bank_code = CharField(max_length=20, required=False, allow_blank=True)
+
+    # Danh sách mã ngân hàng hợp lệ cho VNPay
+    VALID_BANK_CODES = [
+        'VCB',  # Vietcombank
+        'TCB',  # Techcombank
+        'BIDV',  # BIDV
+        'AGRI',  # Agribank
+        'MB',  # MB Bank
+        'ACB',  # ACB
+        'CTG',  # Vietinbank
+        'STB',  # Sacombank
+        'NCB',  # NCB
+        'SCB',  # SCB
+        'EIB',  # Eximbank
+        'MSB',  # Maritime Bank
+        'NAB',  # Nam A Bank
+        'VNMART',  # VnMart
+        'HDB',  # HD Bank
+        'SHB',  # SHB
+        'ABB',  # An Binh Bank
+        'OCB',  # OCB
+        'BAB',  # Bac A Bank
+        'VPB',  # VP Bank
+        'VIB',  # VIB
+        'DAB',  # Dong A Bank
+        'TPB',  # TP Bank
+        'OJB',  # Ocean Bank
+        'SEAB',  # SeABank
+        'UOB',  # UOB
+        'PBVN',  # Public Bank Vietnam
+        'GPB',  # GP Bank
+        'ANZ',  # ANZ
+        'HSBC',  # HSBC
+        'DB',  # Deutsche Bank
+        'SHINHAN',  # Shinhan Bank
+        'MIRAE',  # Mirae Asset
+        'CIMB',  # CIMB
+        'KEB',  # Korea Exchange Bank
+        'CBB',  # CB Bank
+        'KLB',  # Kien Long Bank
+        'IVB',  # IndoVinaBank
+    ]
+
+    def validate_bank_code(self, value):
+        """Validate bank code"""
+        if value and value not in self.VALID_BANK_CODES:
+            # Thay vì raise error, có thể log warning và return None để không sử dụng bank_code
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Invalid bank code received: {value}. Proceeding without specific bank.")
+            return None  # Hoặc return '' để không chỉ định ngân hàng cụ thể
+        return value
+
+    def validate_amount(self, value):
+        """Validate amount"""
+        if value < 1000:
+            raise ValidationError("Số tiền tối thiểu là 1,000 VND")
+        return value
+
+class VNPayReturnSerializer(Serializer):
+    """Serializer để validate dữ liệu return từ VNPay - MOVED TO MODULE LEVEL"""
+    vnp_Amount = CharField()
+    vnp_BankCode = CharField(required=False, allow_blank=True)
+    vnp_BankTranNo = CharField(required=False, allow_blank=True)
+    vnp_CardType = CharField(required=False, allow_blank=True)
+    vnp_OrderInfo = CharField()
+    vnp_PayDate = CharField()
+    vnp_ResponseCode = CharField()
+    vnp_TmnCode = CharField()
+    vnp_TransactionNo = CharField()
+    vnp_TransactionStatus = CharField()
+    vnp_TxnRef = CharField()
+    vnp_SecureHash = CharField()
+
+    def validate_vnp_Amount(self, value):
+        try:
+            # VNPay trả về amount * 100
+            amount = int(value) / 100
+            return amount
+        except (ValueError, TypeError):
+            raise ValidationError("Invalid amount format")
+
+    def validate_vnp_TxnRef(self, value):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            raise ValidationError("Invalid transaction reference")
+
+
+class VNPayIPNSerializer(Serializer):
+    """Serializer để validate IPN (Instant Payment Notification) từ VNPay - MOVED TO MODULE LEVEL"""
+    vnp_Amount = CharField()
+    vnp_BankCode = CharField(required=False, allow_blank=True)
+    vnp_BankTranNo = CharField(required=False, allow_blank=True)
+    vnp_CardType = CharField(required=False, allow_blank=True)
+    vnp_OrderInfo = CharField()
+    vnp_PayDate = CharField()
+    vnp_ResponseCode = CharField()
+    vnp_TmnCode = CharField()
+    vnp_TransactionNo = CharField()
+    vnp_TransactionStatus = CharField()
+    vnp_TxnRef = CharField()
+    vnp_SecureHash = CharField()
+
+    def validate_vnp_Amount(self, value):
+        try:
+            amount = int(value) / 100
+            return amount
+        except (ValueError, TypeError):
+            raise ValidationError("Invalid amount format")
+
+    def validate_vnp_TxnRef(self, value):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            raise ValidationError("Invalid transaction reference")
+
+
+class PaymentSerializer(ModelSerializer):
+    subscription_info = SerializerMethodField()
+    status_display = CharField(source='get_status_display', read_only=True)
+    payment_method_display = CharField(source='get_payment_method_display', read_only=True)
+
+    class Meta:
+        model = Payment
+        fields = [
+            'id', 'subscription', 'subscription_info', 'amount', 'payment_method',
+            'payment_method_display', 'status', 'status_display', 'transaction_id',
+            'payment_date', 'confirmed_date', 'notes', 'bank_name', 'account_name',
+            'account_number', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'payment_date', 'confirmed_date', 'created_at', 'updated_at'
+        ]
+
+    def get_subscription_info(self, obj):
+        return {
+            'id': obj.subscription.id,
+            'member_name': obj.subscription.member.username,
+            'package_name': obj.subscription.package.name,
+            'start_date': obj.subscription.start_date,
+            'end_date': obj.subscription.end_date,
+        }
+
+
+class MoMoCallbackSerializer(Serializer):
+    """Serializer để validate callback từ MoMo"""
+    partnerCode = CharField()
+    orderId = CharField()
+    requestId = CharField()
+    amount = CharField()
+    orderInfo = CharField()
+    orderType = CharField()
+    transId = CharField()
+    resultCode = IntegerField()
+    message = CharField()
+    payType = CharField()
+    responseTime = CharField()
+    extraData = CharField(allow_blank=True)
+    signature = CharField()
+
+
+class PaymentReceiptSerializer(ModelSerializer):
+    payment_info = SerializerMethodField()
+    verified_by_name = CharField(source='verified_by.username', read_only=True)
+
+    class Meta:
+        model = PaymentReceipt
+        fields = [
+            'id', 'payment', 'payment_info', 'receipt_image', 'upload_date',
+            'verified', 'verified_by', 'verified_by_name', 'verification_date', 'notes'
+        ]
+        read_only_fields = ['id', 'upload_date', 'verified_by', 'verification_date']
+
+    def get_payment_info(self, obj):
+        return {
+            'id': obj.payment.id,
+            'amount': obj.payment.amount,
+            'payment_method': obj.payment.get_payment_method_display(),
+            'status': obj.payment.get_status_display(),
+        }
+
+
+
+#
+# Notification
+#
+
+class NotificationSerializer(ModelSerializer):
+    user_name = CharField(source='user.get_full_name', read_only=True)
+    notification_type_display = CharField(source='get_notification_type_display', read_only=True)
+    time_since = SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'title', 'message', 'notification_type', 'notification_type_display',
+            'related_object_id', 'is_read', 'created_at', 'scheduled_time', 'sent',
+            'user_name', 'time_since'
+        ]
+        read_only_fields = ['created_at', 'sent', 'user']
+
+    def get_time_since(self, obj):
+        from django.utils.timesince import timesince
+        return timesince(obj.created_at)
+
+
+class PromotionSerializer(ModelSerializer):
+    applicable_packages_names = StringRelatedField(many=True, source='applicable_packages', read_only=True)
+    is_valid = ReadOnlyField()
+
+    class Meta:
+        model = Promotion
+        fields = [
+            'id', 'title', 'description', 'discount_percentage', 'discount_amount',
+            'valid_from', 'valid_to', 'applicable_packages', 'applicable_packages_names',
+            'promo_code', 'is_active', 'max_uses', 'times_used', 'is_valid',
+            'created_at', 'updated_at'
+        ]
+
