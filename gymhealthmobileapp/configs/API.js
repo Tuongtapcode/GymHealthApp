@@ -2,7 +2,7 @@ import { current } from "@reduxjs/toolkit";
 import axios from "axios";
 
 // Địa chỉ cơ bản của server
-const BASE_URL = "http://192.168.2.16:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = "http://192.168.1.9:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 export const endpoints = {
   login: "/o/token/",
   profile: "/profile/",
@@ -19,7 +19,11 @@ export const endpoints = {
   updateStatusSession: "/workout-sessions/{id}/confirm-session/",
   updateHealthInfo: "/health-info/update/",
   notifications: "/notifications/",
-
+  createTrainerRating:"/trainer-rating/",
+  deleteTrainerRating:"/trainer-rating/{id}/",
+  myTrainerRating:"/trainer-rating/my-ratings/",
+  createGymRating:"/gym-rating/",
+  deleteGymRating:"/gym-rating/{id}/",
   // Payment endpoints
   createMomoPayment: "/payments/create_momo_payment/",
   createVNPayPayment: "api/payments/vnpay/create/",
@@ -39,7 +43,7 @@ export const endpoints = {
   uploadReceipt: "/payment-receipts/",
 };
 
-export const CLIENT_ID = "AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh";
+export const CLIENT_ID = "xFbPBC3vOcOnf5e4dhcVcroXxeqed8Dnpb41PtPY";
 export const CLIENT_SECRET =
   "aJhbfraNTsaTdsr8RqbWmsPM177OGRzlpOrxoCNXqlP9aPPAYFZikipa9rotIp4Ql9QlysSKu8HEHh0ewQC84JspFZA8BubRdGen5NSJHiZNMjqz9XLpixW8L16pCMpr";
 // Tạo instance của axios cho các yêu cầu không cần xác thực

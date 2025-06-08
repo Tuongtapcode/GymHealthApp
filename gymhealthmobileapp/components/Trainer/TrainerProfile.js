@@ -194,7 +194,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
         }
       }
     } catch (error) {
-      console.error('Error fetching health info:', error.response?.data || error.message);
+      // console.error('Error fetching health info:', error.response?.data || error.message);
     }
   };
 

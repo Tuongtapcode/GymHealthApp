@@ -27,6 +27,7 @@ import { PaperProvider } from "react-native-paper";
 import TrainerDashboard from "./components/Trainer/TrainerDashboard";
 import TrainerProfile from "./components/Trainer/TrainerProfile";
 import TrainerSchedule from "./components/Trainer/TrainerSchedule";
+import TrainerRating from "./components/Home/TrainerRating";
 // Import PackagesNavigator thay vì import trực tiếp Packages
 import PackagesNavigator from "./components/Home/Packages/PackagesNavigator";
 import ProgressNavigator from "./components/Home/Progress/ProgressNavigator";
@@ -43,6 +44,7 @@ const HomeStack = () => {
       <Stack.Screen name="HomeMain" component={Home} />
       <Stack.Screen name="Schedule" component={Schedule} />
       <Stack.Screen name="Profile" component={Profile} />
+      <Stack.Screen name="Login" component={Login} />
     </Stack.Navigator>
   );
 };
@@ -261,6 +263,7 @@ const MainTabNavigator = () => {
           if (userData.role) {
             setUserRole(userData.role);
           }
+
         }
         setIsInitialized(true);
       } catch (error) {
@@ -275,8 +278,10 @@ const MainTabNavigator = () => {
   const updateUser = (userData) => {
     console.log("Updating user state:", userData);
     setUser(userData);
-    if (userData.role) {
+    if (userData && userData.role) {
       setUserRole(userData.role);
+    } else {
+      setUserRole(null);
     }
   };
 
@@ -380,10 +385,15 @@ export default function App() {
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Welcome" component={WelcomeScreen} />
             <Stack.Screen name="MainTabs" component={MainTabNavigator} />
-             <Stack.Screen
+            <Stack.Screen
               name="Chat"
               component={ChatScreen}
               options={{ headerShown: true, title: "Chat" }}
+            />
+            <Stack.Screen
+              name="TrainerRating"
+              component={TrainerRating}
+              options={{ headerShown: true, title: "Xem Đánh giá Huấn luyện viên" }}
             />
           </Stack.Navigator>
         </NavigationContainer>

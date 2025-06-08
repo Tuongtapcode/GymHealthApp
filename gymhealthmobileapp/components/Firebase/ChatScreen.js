@@ -8,7 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // Component màn hình chat chính
 export default function ChatScreen({ route, navigation }) {
   // Lấy memberId (người chat cùng) và userId (người dùng hiện tại) từ params khi chuyển màn hình
-  const { memberId, userId: userIdFromParams } = route.params;
+  const { memberId, userId: userIdFromParams, chatName } = route.params;
   // State lưu userId hiện tại (ưu tiên lấy từ params)
   const [userId, setUserId] = useState(userIdFromParams || null);
 
@@ -70,6 +70,12 @@ export default function ChatScreen({ route, navigation }) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={80}
     >
+      {/* Hiển thị tên chat ở đầu boxchat */}
+      <View style={{ padding: 16, backgroundColor: "#fff", borderBottomWidth: 1, borderColor: "#eee" }}>
+        <Text style={{ fontWeight: "bold", fontSize: 18, color: "#4e5ba6", textAlign: "center" }}>
+          {chatName || "Chat"}
+        </Text>
+      </View>
       {/* Danh sách tin nhắn */}
       <FlatList
         ref={flatListRef}

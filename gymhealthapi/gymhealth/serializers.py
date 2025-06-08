@@ -483,7 +483,6 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
 
 class WorkoutSessionListScheduleSerializer(ModelSerializer):
     member_name = SerializerMethodField()
-
     class Meta:
         model = WorkoutSession
         fields = ['id','member_id','trainer_id', 'member_name', 'session_date', 'start_time', 'end_time',
@@ -491,6 +490,7 @@ class WorkoutSessionListScheduleSerializer(ModelSerializer):
 
     def get_member_name(self, obj):
         return f"{obj.member.first_name} {obj.member.last_name}"
+
 
 
 # Thêm vào serializers.py
@@ -513,7 +513,6 @@ class TrainerAllSessionsSerializer(ModelSerializer):
             'time_until_session', 'subscription_info',
             'created_at', 'updated_at'
         ]
-
 
     def get_member_name(self, obj):
         return f"{obj.member.first_name} {obj.member.last_name}"

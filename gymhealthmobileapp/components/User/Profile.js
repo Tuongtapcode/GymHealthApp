@@ -1,6 +1,6 @@
 import { useSelector } from 'react-redux';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, Image, ScrollView, Animated, Modal, TextInput } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Alert, Image, ScrollView, Animated, Modal, TextInput, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDispatch } from 'react-redux';
 import { authAPI, endpoints } from '../../configs/API'; // Import authAPI và endpoints
@@ -9,9 +9,15 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native';
 export default function Profile({ navigation, user: propUser, updateUser }) {
+  // =======================
+  // 1. State và các hàm xử lý
+  // =======================
+
+  // Các state quản lý thông tin user, sức khỏe, loading, menu, modal, form đánh giá phòng gym, v.v.
   const [user, setUser] = useState(propUser || null);
-  const [healthInfo, setHealthInfo] = useState(null); // Thêm state cho thông tin sức khỏe
+  const [healthInfo, setHealthInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showHealthInfo, setShowHealthInfo] = useState(false); // State để ẩn/hiện Health Info
   const [showContactInfo, setShowPersonalInfo] = useState(false); // State để ẩn/hiện Personal Info
@@ -24,14 +30,13 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
   const [newPasswordError, setNewPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
 
-  // State để lưu thông tin chỉnh sửa
+  // State cho chỉnh sửa thông tin cá nhân và sức khỏe
   const [editedPersonalInfo, setEditedPersonalInfo] = useState({
     email: reduxUser?.email || '',
     phone_number: reduxUser?.phone_number || '',
     address: reduxUser?.address || '',
     date_of_birth: reduxUser?.date_of_birth || '',
   });
-
   const [editedHealthInfo, setEditedHealthInfo] = useState({
     height: healthInfo?.height || '',
     weight: healthInfo?.weight || '',
@@ -39,15 +44,31 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     health_conditions: healthInfo?.health_conditions || '',
   });
 
+  // state cho đánh giá phòng gym
+  const [gymRatings, setGymRatings] = useState([]);
+  const [gymRatingScore, setGymRatingScore] = useState("");
+  const [facilityScore, setFacilityScore] = useState("");
+  const [serviceScore, setServiceScore] = useState("");
+  const [gymRatingComment, setGymRatingComment] = useState("");
+  const [gymRatingLoading, setGymRatingLoading] = useState(false);
+  const [showGymRatingForm, setShowGymRatingForm] = useState(false);
+
   const dispatch = useDispatch();
   const reduxUser = useSelector((state) => state.user);
+
+  // =======================
+  // 2. Các hàm xử lý logic
+  // =======================
+
+  // Mở/đóng menu
   const openMenu = () => setMenuVisible(true);
   const closeMenu = () => setMenuVisible(false);
 
+  // Lấy thông tin user khi nhận prop mới hoặc khi mount
   useEffect(() => {
-    if (reduxUser) {
-      setUser(reduxUser);
-      // setUser(propUser);
+    if (propUser) {
+      // setUser(reduxUser);
+      setUser(propUser);
       setLoading(false);
       // fetchUserData();
       fetchHealthInfo(); // Lấy thông tin sức khỏe
@@ -56,30 +77,31 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     } else {
       fetchUserData();
     }
-  }, [reduxUser]);
+  }, [propUser]);
 
+  // Lấy lại thông tin sức khỏe khi focus vào màn hình
   useFocusEffect(
     React.useCallback(() => {
       fetchHealthInfo();
     }, [])
   );
 
-
+  // Đổi mật khẩu
   const handleChangePassword = () => {
     closeMenu();
     setModalVisible(true); // Hiển thị modal
   };
 
+  // Xử lý gửi đổi mật khẩu
   const handleSubmitPasswordChange = async () => {
+    // Kiểm tra hợp lệ
     let hasError = false;
-
     if (!newPassword) {
       setNewPasswordError('must enter!!!');
       hasError = true;
     } else {
       setNewPasswordError('');
     }
-
     if (!confirmPassword) {
       setConfirmPasswordError('must enter!!!');
       hasError = true;
@@ -95,23 +117,20 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
       Alert.alert('Error', 'New password and confirm password do not match.');
       return;
     }
-
+    // Gửi request đổi mật khẩu
     try {
       const accessToken = await AsyncStorage.getItem('accessToken');
       if (!accessToken) {
         Alert.alert('Error', 'Access token not found. Please log in again.');
         return;
       }
-
       const formData = new FormData();
       formData.append('password', newPassword);
-
       const response = await authAPI(accessToken).patch(endpoints.currentuser, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
-
       if (response.status === 200) {
         Alert.alert('Success', 'Password changed successfully.');
         setModalVisible(false);
@@ -126,16 +145,15 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }
   };
 
+  // Đăng xuất
   const handleLogout = async () => {
     closeMenu();
     try {
       await AsyncStorage.removeItem('accessToken');
       dispatch({ type: 'logout' });
-
       if (updateUser) {
         updateUser(null);
       }
-
       Alert.alert('Logout Successful', 'You have been logged out.');
     } catch (error) {
       console.error('Logout error:', error.message);
@@ -143,8 +161,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }
   };
 
-
-
+  // Lấy thông tin user từ server
   const fetchUserData = async () => {
     try {
       const accessToken = await AsyncStorage.getItem('accessToken');
@@ -179,6 +196,7 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }
   };
 
+  // Lấy thông tin sức khỏe từ server
   const fetchHealthInfo = async () => {
     try {
       const accessToken = await AsyncStorage.getItem('accessToken');
@@ -186,7 +204,6 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
 
       if (accessToken) {
         const response = await authAPI(accessToken).get(endpoints.healthinfo);
-
         if (response.status >= 200 && response.status < 300) {
           const healthData = response.data;
           console.log('Health Info:', healthData);
@@ -198,221 +215,374 @@ export default function Profile({ navigation, user: propUser, updateUser }) {
     }
   };
 
+  // Lấy danh sách đánh giá phòng gym
+  const fetchGymRatings = async () => {
+    setGymRatingLoading(true);
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      const res = await authAPI(accessToken).get(endpoints.createGymRating);
+      setGymRatings(res.data.results || []);
+    } catch (e) {
+      setGymRatings([]);
+    }
+    setGymRatingLoading(false);
+  };
+
+  // Gửi đánh giá phòng gym
+  const handleSubmitGymRating = async () => {
+    if (!gymRatingScore || !facilityScore || !serviceScore) {
+      Alert.alert("Lỗi", "Vui lòng nhập đủ các điểm đánh giá (1-5)");
+      return;
+    }
+    try {
+      const accessToken = await AsyncStorage.getItem("accessToken");
+      const formData = new FormData();
+      formData.append("gym_id", 1);
+      formData.append("score", gymRatingScore);
+      formData.append("facility_score", facilityScore);
+      formData.append("service_score", serviceScore);
+      formData.append("comment", gymRatingComment);
+      formData.append("anonymous", false);
+
+      await authAPI(accessToken).post(endpoints.createGymRating, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      Alert.alert("Thành công", "Đã gửi đánh giá phòng gym!");
+      setGymRatingScore("");
+      setFacilityScore("");
+      setServiceScore("");
+      setGymRatingComment("");
+      setShowGymRatingForm(false);
+      fetchGymRatings();
+    } catch (error) {
+      // Xử lý lỗi trả về từ server khi gửi đánh giá
+      let message = "Có lỗi khi gửi đánh giá!";
+      if (error.response && error.response.data) {
+        const data = error.response.data;
+        if (data.error) message = data.error;
+        else if (typeof data === "object" && data !== null) {
+          const firstField = Object.keys(data)[0];
+          if (firstField && Array.isArray(data[firstField]) && data[firstField].length > 0) {
+            message = data[firstField][0];
+          }
+        } else if (typeof data === "string") message = data;
+        else if (data.message) message = data.message;
+      }
+      Alert.alert("Thông Báo", message);
+    }
+  };
+
+  // Lấy danh sách đánh giá khi vào màn hình
+  useEffect(() => {
+    fetchGymRatings();
+  }, []);
+
+  // Ẩn/hiện thông tin sức khỏe với hiệu ứng
   const handleToggleHealthInfo = () => {
     setShowHealthInfo(!showHealthInfo);
     Animated.timing(animationHeightHealth, {
-      toValue: showHealthInfo ? 0 : 300, // Chiều cao khi ẩn hoặc hiển thị
-      duration: 300, // Thời gian hoạt ảnh
+      toValue: showHealthInfo ? 0 : 300,
+      duration: 300,
       useNativeDriver: false,
     }).start();
-    if (!showHealthInfo) {
-      if (!healthInfo) {
-        Alert.alert('Error', 'No health information.');
-      }
+    if (!showHealthInfo && !healthInfo) {
+      Alert.alert('Error', 'No health information.');
     }
   };
+
+  // Ẩn/hiện thông tin cá nhân với hiệu ứng
   const handleToggleContactInfo = () => {
     setShowPersonalInfo(!showContactInfo);
     Animated.timing(animationHeightContact, {
-      toValue: showContactInfo ? 0 : 170, // Chiều cao khi ẩn hoặc hiển thị
-      duration: 300, // Thời gian hoạt ảnh
+      toValue: showContactInfo ? 0 : 170,
+      duration: 300,
       useNativeDriver: false,
     }).start();
   };
 
-
+  // =======================
+  // 3. Render UI
+  // =======================
 
   if (loading) {
+    // Hiển thị loading khi đang lấy dữ liệu
     return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Loading...</Text>
+      <View style={profileStyles.container}>
+        <Text style={profileStyles.text}>Loading...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-
-      {/* Menu */}
-      <View style={styles.menuContainer}>
+    <ScrollView contentContainerStyle={profileStyles.container}>
+      {/* Menu chức năng (đổi mật khẩu, logout) */}
+      <View style={profileStyles.menuContainer}>
         <Menu
           visible={menuVisible}
           onDismiss={closeMenu}
           anchor={
             <TouchableOpacity onPress={openMenu}>
-              <Text style={styles.menuIcon}>☰</Text>
+              <Text style={profileStyles.menuIcon}>☰</Text>
             </TouchableOpacity>
           }
-          style={styles.menuStyle} // Thêm style cho menu
+          style={profileStyles.menuStyle}
         >
           <Menu.Item
             onPress={handleChangePassword}
             title="Change Password"
-            titleStyle={styles.menuItemText} // Style cho text trong menu
+            titleStyle={profileStyles.menuItemText}
           />
           <Divider />
           <Menu.Item
             onPress={handleLogout}
             title="Logout"
-            titleStyle={styles.menuItemText} // Style cho text trong menu
+            titleStyle={profileStyles.menuItemText}
           />
         </Menu>
       </View>
 
-
-
-
-      {/* Container chứa avatar và tên */}
-      <View style={styles.profileHeader}>
+      {/* Thông tin avatar và tên user */}
+      <View style={profileStyles.profileHeader}>
         {user?.avatar && (
-          <View style={styles.avatarContainer}>
+          <View style={profileStyles.avatarContainer}>
             <Image
               source={{ uri: user.avatar }}
-              style={styles.avatar}
+              style={profileStyles.avatar}
             />
           </View>
         )}
-        <View style={styles.nameandrole}>
-          <Text style={styles.name} numberOfLines={2} ellipsizeMode="tail">
+        <View style={profileStyles.nameandrole}>
+          <Text style={profileStyles.name} numberOfLines={2} ellipsizeMode="tail">
             {user?.last_name || 'last name'} {user?.first_name || 'first name'}
           </Text>
-          <Text style={styles.role}>{user?.role || 'role'}</Text>
+          <Text style={profileStyles.role}>{user?.role || 'role'}</Text>
         </View>
       </View>
 
-
-
-      {/* Bọc chữ "Personal Information" trong một vùng có thể nhấn */}
-      <TouchableOpacity style={styles.personalInfoTouchable} onPress={(handleToggleContactInfo)}>
-        <Text style={styles.cardTitle}>Personal Information</Text>
+      {/* Thông tin cá nhân (Personal Info) có thể ẩn/hiện */}
+      <TouchableOpacity style={profileStyles.personalInfoTouchable} onPress={handleToggleContactInfo}>
+        <Text style={profileStyles.cardTitle}>Personal Information</Text>
       </TouchableOpacity>
-
-
-      {/* Khung Personal Info */}
-      <Animated.View style={[styles.personalInfoContainer, { height: animationHeightContact }]}>
+      <Animated.View style={[profileStyles.personalInfoContainer, { height: animationHeightContact }]}>
         {showContactInfo && (
           <>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Email:</Text>
-              <Text style={styles.infoValue}>{reduxUser?.email || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Email:</Text>
+              <Text style={profileStyles.infoValue}>{reduxUser?.email || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Phone:</Text>
-              <Text style={styles.infoValue}>{reduxUser?.phone_number || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Phone:</Text>
+              <Text style={profileStyles.infoValue}>{reduxUser?.phone_number || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Address:</Text>
-              <Text style={styles.infoValue}>{reduxUser?.address || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Address:</Text>
+              <Text style={profileStyles.infoValue}>{reduxUser?.address || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Date of Birth:</Text>
-              <Text style={styles.infoValue}>{reduxUser?.date_of_birth || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Date of Birth:</Text>
+              <Text style={profileStyles.infoValue}>{reduxUser?.date_of_birth || '...'}</Text>
             </View>
-
           </>
         )}
       </Animated.View>
 
-
-
-      {/* Bọc chữ "Health Information" trong một vùng có thể nhấn */}
-      <TouchableOpacity style={styles.healthInfoTouchable} onPress={handleToggleHealthInfo}>
-        <Text style={styles.cardTitle}>Health Information</Text>
+      {/* Thông tin sức khỏe (Health Info) có thể ẩn/hiện */}
+      <TouchableOpacity style={profileStyles.healthInfoTouchable} onPress={handleToggleHealthInfo}>
+        <Text style={profileStyles.cardTitle}>Health Information</Text>
       </TouchableOpacity>
-
-      {/* Khung Health Info */}
-      <Animated.View style={[styles.healthInfoContainer, { height: animationHeightHealth }]}>
+      <Animated.View style={[profileStyles.healthInfoContainer, { height: animationHeightHealth }]}>
         {showHealthInfo && (
           <>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Height:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.height ? `${healthInfo.height} cm` : '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Height:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.height ? `${healthInfo.height} cm` : '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Weight:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.weight ? `${healthInfo.weight} kg` : '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Weight:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.weight ? `${healthInfo.weight} kg` : '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Training Goal:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.training_goal || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Training Goal:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.training_goal || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Health Conditions:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.health_conditions || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Health Conditions:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.health_conditions || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Notes:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.notes || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Notes:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.notes || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Body Fat Percentage:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.body_fat_percentage ? `${healthInfo.body_fat_percentage}%` : '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Body Fat Percentage:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.body_fat_percentage ? `${healthInfo.body_fat_percentage}%` : '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Blood Pressure:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.blood_pressure || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Blood Pressure:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.blood_pressure || '...'}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Medical Conditions:</Text>
-              <Text style={styles.infoValue}>{healthInfo?.medical_conditions || '...'}</Text>
+            <View style={profileStyles.infoRow}>
+              <Text style={profileStyles.infoLabel}>Medical Conditions:</Text>
+              <Text style={profileStyles.infoValue}>{healthInfo?.medical_conditions || '...'}</Text>
             </View>
           </>
         )}
       </Animated.View>
 
-
-
-
-      <TouchableOpacity style={styles.button} onPress={handleLogout}>
-        <Text style={styles.buttonText}>Logout</Text>
-      </TouchableOpacity>
-
-
-
-      {/* Modal for changing password */}
+      {/* Modal đổi mật khẩu */}
       <Modal
         visible={isModalVisible}
         animationType="slide"
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Change Password</Text>
-
+        <View style={profileStyles.modalContainer}>
+          <View style={profileStyles.modalContent}>
+            <Text style={profileStyles.modalTitle}>Change Password</Text>
             <TextInput
-              style={styles.input}
+              style={profileStyles.input}
               placeholder="New Password"
               secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
             />
-            {newPasswordError ? <Text style={styles.errorText}>{newPasswordError}</Text> : null}
+            {newPasswordError ? <Text style={profileStyles.errorText}>{newPasswordError}</Text> : null}
             <TextInput
-              style={styles.input}
+              style={profileStyles.input}
               placeholder="Confirm New Password"
               secureTextEntry
               value={confirmPassword}
               onChangeText={setConfirmPassword}
             />
-            {confirmPasswordError ? <Text style={styles.errorText}>{confirmPasswordError}</Text> : null}
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalButton} onPress={handleSubmitPasswordChange}>
-                <Text style={styles.modalButtonText}>Submit</Text>
+            {confirmPasswordError ? <Text style={profileStyles.errorText}>{confirmPasswordError}</Text> : null}
+            <View style={profileStyles.modalButtons}>
+              <TouchableOpacity style={profileStyles.modalButton} onPress={handleSubmitPasswordChange}>
+                <Text style={profileStyles.modalButtonText}>Submit</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={() => setModalVisible(false)}>
-                <Text style={styles.modalButtonText}>Cancel</Text>
+              <TouchableOpacity style={profileStyles.modalButton} onPress={() => setModalVisible(false)}>
+                <Text style={profileStyles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
+      {/* Đánh giá phòng gym */}
+      <View style={gymRatingStyles.container}>
+        <Text style={gymRatingStyles.title}>
+          Đánh giá phòng gym
+        </Text>
+        {/* Nút mở/đóng form đánh giá */}
+        <TouchableOpacity
+          style={gymRatingStyles.addButton}
+          onPress={() => setShowGymRatingForm(!showGymRatingForm)}
+        >
+          <Text style={gymRatingStyles.addButtonText}>
+            {"Thêm Đánh giá"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Form đánh giá phòng gym */}
+        {showGymRatingForm && (
+          <View style={gymRatingStyles.form}>
+            <Text style={gymRatingStyles.sectionTitle}>Điểm tổng thể (1-5):</Text>
+            <TextInput
+              style={gymRatingStyles.input}
+              placeholder="Nhập điểm tổng thể (1-5)"
+              value={gymRatingScore}
+              onChangeText={v => setGymRatingScore(v.replace(/[^1-5]/g, ""))}
+              keyboardType="numeric"
+              maxLength={1}
+            />
+            <Text style={gymRatingStyles.sectionTitle}>Điểm cơ sở vật chất (1-5):</Text>
+            <TextInput
+              style={gymRatingStyles.input}
+              placeholder="Nhập điểm cơ sở vật chất (1-5)"
+              value={facilityScore}
+              onChangeText={v => setFacilityScore(v.replace(/[^1-5]/g, ""))}
+              keyboardType="numeric"
+              maxLength={1}
+            />
+            <Text style={gymRatingStyles.sectionTitle}>Điểm dịch vụ (1-5):</Text>
+            <TextInput
+              style={gymRatingStyles.input}
+              placeholder="Nhập điểm dịch vụ (1-5)"
+              value={serviceScore}
+              onChangeText={v => setServiceScore(v.replace(/[^1-5]/g, ""))}
+              keyboardType="numeric"
+              maxLength={1}
+            />
+            <Text style={gymRatingStyles.sectionTitle}>Bình luận:</Text>
+            <TextInput
+              style={gymRatingStyles.input}
+              placeholder="Nhập bình luận"
+              value={gymRatingComment}
+              onChangeText={setGymRatingComment}
+              multiline
+            />
+            <TouchableOpacity
+              style={gymRatingStyles.submitButton}
+              onPress={handleSubmitGymRating}
+            >
+              <Text style={gymRatingStyles.submitButtonText}>Gửi đánh giá</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Danh sách đánh giá */}
+        <Text style={gymRatingStyles.sectionTitle}>Các đánh giá gần đây:</Text>
+        {gymRatingLoading ? (
+          <ActivityIndicator size="small" color="#4e5ba6" />
+        ) : (
+          gymRatings.length === 0 ? (
+            <Text style={gymRatingStyles.emptyText}>Chưa có đánh giá nào.</Text>
+          ) : (
+            gymRatings.map(rating => (
+              <View
+                key={rating.id}
+                style={gymRatingStyles.ratingItem}
+              >
+                <View style={gymRatingStyles.ratingHeader}>
+                  {rating.user_details?.avatar && (
+                    <Image
+                      source={{ uri: `https://res.cloudinary.com/duqln52pu/${rating.user_details.avatar}` }}
+                      style={gymRatingStyles.ratingAvatar}
+                    />
+                  )}
+                  <Text style={gymRatingStyles.ratingName}>
+                    {rating.user_details?.last_name} {rating.user_details?.first_name}
+                  </Text>
+                </View>
+                <Text>
+                  Điểm tổng thể: <Text style={gymRatingStyles.ratingScore}>{rating.score}</Text>
+                </Text>
+                <Text>
+                  Cơ sở vật chất: {rating.facility_score} | Dịch vụ: {rating.service_score} | Trung bình: {rating.average_score}
+                </Text>
+                <Text>Bình luận: {rating.comment || "Không có"}</Text>
+                <Text style={gymRatingStyles.ratingDate}>
+                  Ngày: {new Date(rating.created_at).toLocaleString()}
+                </Text>
+              </View>
+            ))
+          )
+        )}
+      </View>
+
+      {/* Nút logout */}
+      <TouchableOpacity style={profileStyles.button} onPress={handleLogout}>
+        <Text style={profileStyles.buttonText}>Logout</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
+
+  // =======================
+  // 4. StyleSheet cho toàn bộ màn hình và phần đánh giá phòng gym
+  // =======================
 }
 
-const styles = StyleSheet.create({
+// Tách style ra cuối file, đổi tên thành profileStyles
+const profileStyles = StyleSheet.create({
   container: {
     flexGrow: 0,
     justifyContent: 'center',
@@ -616,5 +786,93 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+});
+
+const gymRatingStyles = StyleSheet.create({
+  container: {
+    width: "100%",
+    backgroundColor: "#f0f0f0",
+    borderRadius: 10,
+    padding: 15,
+    marginTop: 20,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#007bff",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  addButton: {
+    backgroundColor: "#4e5ba6",
+    padding: 10,
+    borderRadius: 6,
+    alignItems: "center",
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  addButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  form: {
+    marginBottom: 16,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#4e5ba6",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  submitButton: {
+    backgroundColor: "#4e5ba6",
+    padding: 10,
+    borderRadius: 6,
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  submitButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  sectionTitle: {
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: "#888",
+    textAlign: "center",
+  },
+  ratingItem: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  ratingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  ratingAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+    backgroundColor: "#eee",
+  },
+  ratingName: {
+    fontWeight: "bold",
+  },
+  ratingScore: {
+    fontWeight: "bold",
+  },
+  ratingDate: {
+    color: "#888",
+    fontSize: 12,
   },
 });

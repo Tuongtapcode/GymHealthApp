@@ -636,7 +636,7 @@ const TrainerSchedule = ({ navigation }) => {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() =>
-            navigation.navigate("Chat", { memberId: item.member_id, userId: item.trainer_id })
+            navigation.navigate("Chat", { memberId: item.member_id, userId: item.trainer_id, chatName: item.member_name })
           }
         >
           <Icon name="chat" size={20} color="#2196F3" />

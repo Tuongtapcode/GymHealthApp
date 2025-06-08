@@ -156,13 +156,26 @@ export default function Register({ navigation }) {
 
       if (response.data && response.status === 201) {
         Alert.alert('Register Successful', 'You can now log in.');
-        navigation.navigate('Login'); // Điều hướng về màn hình Login sau khi đăng ký thành công
+        // navigation.navigate('Login'); // Điều hướng về màn hình Login sau khi đăng ký thành công
       } else {
         Alert.alert('Register Failed', 'Please check your details.');
       }
     } catch (error) {
-      console.error('Error:', error.response?.data || error.message);
-      Alert.alert('Register Error', error.response?.data?.error || 'An error occurred.');
+      // Nếu server trả về lỗi dạng object (có nhiều trường lỗi), nối lại thành chuỗi
+      let errorMsg = "An error occurred.";
+      if (error.response?.data) {
+        if (typeof error.response.data === "string") {
+          errorMsg = error.response.data;
+        } else if (typeof error.response.data === "object") {
+          // Lấy tất cả thông báo lỗi từ các trường
+          errorMsg = Object.values(error.response.data)
+            .flat()
+            .join('\n');
+        }
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+      Alert.alert('Register Error', errorMsg);
     }
   };
 
@@ -262,7 +275,7 @@ export default function Register({ navigation }) {
       />
 
       {/* Avatar Picker */}
-      <TouchableOpacity onPress={handlePickImage} style={styles.input}>
+      <TouchableOpacity onPress={handlePickImage} style={[styles.input, { height: 100 }]}>
         <Text style={{ color: avatar ? '#333' : '#aaa' }}>
           {avatar ? 'Avatar Selected' : 'Select Avatar'}
         </Text>
