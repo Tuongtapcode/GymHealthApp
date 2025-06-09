@@ -753,7 +753,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
             status='active',
             start_date__lte=date.today(),
             end_date__gte=date.today()
-        ).first()
+        ).order_by('-remaining_pt_sessions', '-created_at').first()
 
         if not subscription:
             return Response({"error": "Không tìm thấy gói đăng ký đang hoạt động"},
@@ -827,17 +827,47 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
         except MemberProfile.DoesNotExist:
             raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
 
+        # Lấy gói tập đang hoạt động (sử dụng logic tương tự active_subscription)
+        active_subscription = SubscriptionPackage.objects.filter(
+            member=request.user,
+            status='active',
+            start_date__lte=date.today(),
+            end_date__gte=date.today()
+        ).order_by('-remaining_pt_sessions', '-created_at').first()
+
+        if not active_subscription:
+            return Response(
+                {"error": "Bạn chưa có gói tập nào đang hoạt động. Vui lòng đăng ký gói tập trước khi đặt lịch."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Kiểm tra loại buổi tập và số buổi PT còn lại
+        session_type = request.data.get('session_type')
+        if session_type == 'pt_session':
+            if active_subscription.remaining_pt_sessions <= 0:
+                return Response(
+                    {
+                        "error": "Bạn đã hết số buổi tập với PT trong gói hiện tại. "
+                                 f"Số buổi PT còn lại: {active_subscription.remaining_pt_sessions}. "
+                                 "Vui lòng gia hạn gói tập hoặc mua thêm buổi PT."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         # Lấy serializer class và khởi tạo nó
         serializer_class = self.get_serializer_class()
         serializer = serializer_class(data=request.data, context={'request': request})
 
         # Xác thực dữ liệu
         serializer.is_valid(raise_exception=True)
-        # Lưu dữ liệu khi đã xác thực
-        serializer.save(member=request.user)
+
+        # Lưu dữ liệu với member và subscription
+        workout_session = serializer.save(
+            member=request.user,
+            subscription=active_subscription
+        )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
     @action(detail=False, methods=['get'], url_path='trainer/pending-session', url_name='trainer_sessions',
             permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
     def trainer_sessions(self, request):
@@ -1853,62 +1883,180 @@ class TrainingProgressViewSet(viewsets.ViewSet):
 
 
 ### API ratiing:
-
 class TrainerRatingViewSet(viewsets.ModelViewSet):
     """
     API endpoint cho đánh giá huấn luyện viên
-    - List/Create: GET/POST /api/trainers/{trainer_id}/ratings/
-    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/ratings/{id}/
+    - List/Create: GET/POST /api/trainer-ratings/
+    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/trainer-ratings/{id}/
     - Custom actions:
-      + average_rating: GET /api/trainers/{trainer_id}/ratings/average/
+      + my_ratings: GET /api/trainer-ratings/my-ratings/
     """
     serializer_class = serializers.TrainerRatingSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = paginators.ItemPaginator
 
-    def get_queryset(self):
-        # Cho phép filter theo trainer_id nếu có trong URL
-        trainer_id = self.kwargs.get('trainer_id')
-        if trainer_id:
-            return TrainerRating.objects.filter(trainer_id=trainer_id)
-        return TrainerRating.objects.all()
+    @action(detail=False, methods=['get'], url_path='trainer/my_rating')
+    def trainer_my_rating(self, request):
+        """
+        Lấy tất cả đánh giá mà trainer hiện tại đã nhận từ các hội viên
+        GET /api/trainer-ratings/trainer/my_rating/
+        Chỉ trainer mới có thể truy cập endpoint này
+        """
+        # Kiểm tra user hiện tại có phải là trainer không
+        if request.user.role != 'TRAINER':
+            return Response(
+                {"error": "Chỉ trainer mới có thể xem đánh giá của mình"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        trainer_id = self.kwargs.get('trainer_id')
+        # Lấy tất cả đánh giá cho trainer hiện tại
+        ratings = TrainerRating.objects.filter(trainer=request.user).order_by('-created_at')
+
+        # Áp dụng pagination
+        page = self.paginate_queryset(ratings)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(ratings, many=True)
+
+        # Tính toán thống kê tổng quan
+        if ratings.exists():
+            avg_knowledge = sum(r.knowledge_score for r in ratings) / ratings.count()
+            avg_communication = sum(r.communication_score for r in ratings) / ratings.count()
+            avg_punctuality = sum(r.punctuality_score for r in ratings) / ratings.count()
+            avg_overall = sum(r.overall_score for r in ratings) / ratings.count()
+
+            stats = {
+                "total_ratings": ratings.count(),
+                "average_knowledge": round(avg_knowledge, 1),
+                "average_communication": round(avg_communication, 1),
+                "average_punctuality": round(avg_punctuality, 1),
+                "average_overall": round(avg_overall, 1)
+            }
+        else:
+            stats = {
+                "total_ratings": 0,
+                "average_knowledge": 0,
+                "average_communication": 0,
+                "average_punctuality": 0,
+                "average_overall": 0
+            }
+
+        return Response({
+            "stats": stats,
+            "ratings": serializer.data
+        })
+    @action(detail=False, methods=['get'], url_path='my-ratings')
+    def my_ratings(self, request):
+        """
+        Lấy tất cả đánh giá trainer mà user hiện tại đã tạo
+        GET /api/trainer-ratings/my-ratings/
+        """
+        ratings = TrainerRating.objects.filter(user=request.user)
+        serializer = self.get_serializer(ratings, many=True)
+        return Response(serializer.data)
+
+    def get_queryset(self):
+        """
+        Có thể filter theo trainer_id qua query params
+        GET /api/trainer-ratings/?trainer_id=123
+        """
+        queryset = TrainerRating.objects.all()
+        trainer_id = self.request.query_params.get('trainer_id')
         if trainer_id:
-            context['trainer_id'] = trainer_id
-        return context
+            queryset = queryset.filter(trainer_id=trainer_id)
+        return queryset
 
     def create(self, request, *args, **kwargs):
-        trainer_id = self.kwargs.get('trainer_id')
-        if not trainer_id:
+        """Tạo phản hồi cho đánh giá với rating_id từ body request"""
+
+        # Lấy rating_id từ body request (có thể là trainer_rating hoặc rating_id)
+        rating_id = request.data.get('trainer_rating') or request.data.get('rating_id')
+
+        if not rating_id:
             return Response(
-                {"error": "Thiếu trainer_id trong URL"},
+                {"error": "Thiếu rating_id trong request body"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Validate rating_id là số
         try:
-            trainer = User.objects.get(id=trainer_id, role='TRAINER')
-        except User.DoesNotExist:
+            rating_id = int(rating_id)
+        except (ValueError, TypeError):
             return Response(
-                {"error": "Không tìm thấy huấn luyện viên"},
+                {"error": "rating_id phải là một số"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Kiểm tra rating có tồn tại không
+        try:
+            trainer_rating = TrainerRating.objects.get(id=rating_id)
+        except TrainerRating.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy đánh giá với rating_id này"},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        data = request.data.copy()
-        data['trainer'] = trainer_id
+        # Kiểm tra quyền phản hồi (chỉ trainer được đánh giá mới có thể phản hồi)
+        if request.user != trainer_rating.trainer:
+            return Response(
+                {"error": "Bạn không có quyền phản hồi đánh giá này"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
-            headers=headers
-        )
+        # Kiểm tra đã phản hồi chưa
+        existing_response = FeedbackResponse.objects.filter(
+            trainer_rating=trainer_rating,
+            responder=request.user
+        ).first()
 
+        if existing_response:
+            # Nếu đã có phản hồi, cập nhật thay vì tạo mới
+            serializer = self.get_serializer(existing_response, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+
+            # Cập nhật trainer_rating và responder
+            serializer.validated_data['trainer_rating'] = trainer_rating
+            serializer.validated_data['responder'] = request.user
+
+            self.perform_update(serializer)
+
+            return Response(
+                {
+                    "message": "Phản hồi đã được cập nhật",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        else:
+            # Tạo phản hồi mới
+            # Tạo một bản sao của request.data để không modify original
+            response_data = request.data.copy()
+            response_data['trainer_rating'] = rating_id
+
+            serializer = self.get_serializer(data=response_data)
+            serializer.is_valid(raise_exception=True)
+
+            # Set trainer_rating và responder trong perform_create
+            serializer.validated_data['trainer_rating'] = trainer_rating
+            serializer.validated_data['responder'] = request.user
+
+            self.perform_create(serializer)
+
+            headers = self.get_success_headers(serializer.data)
+            return Response(
+                {
+                    "message": "Phản hồi đã được tạo thành công",
+                    "data": serializer.data
+                },
+                status=status.HTTP_201_CREATED,
+                headers=headers
+            )
+
+    def perform_create(self, serializer):
+        """Gán user hiện tại khi tạo rating"""
+        serializer.save(user=self.request.user)
     @action(detail=False, methods=['get'], url_path='average')
     def average_rating(self, request, trainer_id=None):
         """
@@ -1944,105 +2092,6 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
 
         return Response(data, status=status.HTTP_200_OK)
 
-
-class GymRatingViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint cho đánh giá phòng gym
-    - List: GET /api/gyms/{gym_id}/ratings/
-    - Create: POST /api/gyms/{gym_id}/ratings/
-    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/ratings/{id}/
-    - Custom actions:
-      + average: GET /api/gyms/{gym_id}/ratings/average/
-    """
-    serializer_class = serializers.GymRatingSerializer
-    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
-    pagination_class = paginators.ItemPaginator
-
-    def get_queryset(self):
-        # Cho phép filter theo gym_id nếu có trong URL
-        gym_id = self.kwargs.get('gym_id')
-        if gym_id:
-            return GymRating.objects.filter(gym_id=gym_id)
-        return GymRating.objects.all()
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        gym_id = self.kwargs.get('gym_id')
-        if gym_id:
-            context['gym_id'] = gym_id
-        return context
-
-    def create(self, request, *args, **kwargs):
-        gym_id = self.kwargs.get('gym_id')
-        if not gym_id:
-            return Response(
-                {"error": "Thiếu gym_id trong URL"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        gym = Gym.objects.filter(id=gym_id).first()
-        if gym is None:
-            return Response(
-                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if GymRating.objects.filter(user=request.user, gym_id=gym_id).exists():
-            return Response(
-                {"error": "Bạn đã đánh giá phòng gym này rồi"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        data = request.data.copy()
-        data['gym'] = gym_id
-
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
-            headers=headers
-        )
-
-    @action(detail=False, methods=['get'], url_path='(?P<gym_id>\d+)/average')
-    def average(self, request, gym_id=None):
-        """
-        Lấy điểm trung bình của phòng gym
-        GET /api/gyms/{gym_id}/ratings/average/
-        """
-        gym = Gym.objects.filter(id=gym_id).first()
-        if gym is None:
-            return Response(
-                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        ratings = GymRating.objects.filter(gym=gym)
-
-        if not ratings.exists():
-            return Response(
-                {"average": 0, "count": 0},
-                status=status.HTTP_200_OK
-            )
-
-        avg_facility = sum(r.facility_score for r in ratings) / ratings.count()
-        avg_service = sum(r.service_score for r in ratings) / ratings.count()
-        avg_overall = sum(r.overall_score for r in ratings) / ratings.count()
-
-        data = {
-            "gym_id": gym_id,
-            "gym_name": gym.name,
-            "average_facility": round(avg_facility, 1),
-            "average_service": round(avg_service, 1),
-            "average_overall": round(avg_overall, 1),
-            "total_ratings": ratings.count()
-        }
-
-        return Response(data, status=status.HTTP_200_OK)
-
-
 class FeedbackResponseViewSet(viewsets.ModelViewSet):
     """
     API endpoint cho phản hồi đánh giá
@@ -2072,54 +2121,110 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
         return context
 
     def create(self, request, *args, **kwargs):
-        rating_id = self.kwargs.get('rating_id')
-        if not rating_id:
+        """Tạo phản hồi cho đánh giá với rating_id từ body request"""
+
+        # Lấy rating_id từ body request
+        trainer_rating_id = request.data.get('trainer_rating')
+        gym_rating_id = request.data.get('gym_rating')
+
+        # Kiểm tra có ít nhất một loại rating
+        if not trainer_rating_id and not gym_rating_id:
             return Response(
-                {"error": "Thiếu rating_id trong URL"},
+                {"error": "Phải chỉ định trainer_rating hoặc gym_rating trong request body"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Kiểm tra loại rating và quyền truy cập
-        trainer_rating = None
-        gym_rating = None
+        # Kiểm tra không được chỉ định cả hai
+        if trainer_rating_id and gym_rating_id:
+            return Response(
+                {"error": "Chỉ có thể phản hồi cho một loại đánh giá"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        try:
-            trainer_rating = TrainerRating.objects.get(id=rating_id)
-            if not self._check_trainer_rating_permission(request.user, trainer_rating):
-                return Response(
-                    {"error": "Bạn không có quyền phản hồi đánh giá này"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        except TrainerRating.DoesNotExist:
+        # Xử lý trainer rating
+        if trainer_rating_id:
             try:
-                gym_rating = GymRating.objects.get(id=rating_id)
-                if not self._check_gym_rating_permission(request.user, gym_rating):
+                trainer_rating_id = int(trainer_rating_id)
+                trainer_rating = TrainerRating.objects.get(id=trainer_rating_id)
+
+                # Kiểm tra quyền phản hồi
+                if request.user != trainer_rating.trainer:
                     return Response(
                         {"error": "Bạn không có quyền phản hồi đánh giá này"},
                         status=status.HTTP_403_FORBIDDEN
                     )
-            except GymRating.DoesNotExist:
+
+                # Kiểm tra đã phản hồi chưa
+                existing_response = FeedbackResponse.objects.filter(
+                    trainer_rating=trainer_rating,
+                    responder=request.user
+                ).first()
+
+            except (ValueError, TypeError):
                 return Response(
-                    {"error": "Không tìm thấy đánh giá"},
+                    {"error": "trainer_rating phải là một số"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except TrainerRating.DoesNotExist:
+                return Response(
+                    {"error": "Không tìm thấy đánh giá trainer với ID này"},
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-        data = request.data.copy()
-        if trainer_rating:
-            data['trainer_rating'] = rating_id
-        elif gym_rating:
-            data['gym_rating'] = rating_id
+        # Xử lý gym rating (tương tự trainer rating)
+        if gym_rating_id:
+            try:
+                gym_rating_id = int(gym_rating_id)
+                # Thêm logic xử lý gym_rating tương tự như trainer_rating
+                # gym_rating = GymRating.objects.get(id=gym_rating_id)
+                # ... logic kiểm tra quyền và existing response
+                existing_response = None  # Placeholder
 
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
-            headers=headers
-        )
+            except (ValueError, TypeError):
+                return Response(
+                    {"error": "gym_rating phải là một số"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # except GymRating.DoesNotExist:
+            #     return Response(
+            #         {"error": "Không tìm thấy đánh giá gym với ID này"},
+            #         status=status.HTTP_404_NOT_FOUND
+            #     )
 
+        # Kiểm tra response_text có được cung cấp không
+        if not request.data.get('response_text'):
+            return Response(
+                {"error": "Thiếu response_text trong request body"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if existing_response:
+            # Cập nhật phản hồi hiện có
+            update_data = {'response_text': request.data.get('response_text')}
+
+            serializer = self.get_serializer(existing_response, data=update_data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+            return Response(
+                {
+                    "message": "Phản hồi đã được cập nhật thành công",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        else:
+            # Tạo phản hồi mới - sử dụng toàn bộ request.data
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(
+                {
+                    "message": "Phản hồi đã được tạo thành công",
+                    "data": serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
     def _check_trainer_rating_permission(self, user, trainer_rating):
         """Kiểm tra quyền phản hồi đánh giá HLV"""
         return (user.is_staff or user.is_manager or
@@ -2149,6 +2254,137 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
             "total_responses": responses.count(),
             "latest_response": serializers.FeedbackResponseSerializer(responses.latest('created_at')).data,
             "responders": list(responses.values_list('responder__username', flat=True).distinct())
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class GymRatingViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint cho đánh giá phòng gym
+    - List: GET /api/gym-ratings/
+    - Create: POST /api/gym-ratings/ (gym_id trong body)
+    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/gym-ratings/{id}/
+    - Custom actions:
+      + my-ratings: GET /api/gym-ratings/my-ratings/
+      + gym-average: GET /api/gym-ratings/gym-average/?gym_id={gym_id}
+    """
+    serializer_class = serializers.GymRatingSerializer
+    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+    pagination_class = paginators.ItemPaginator
+
+
+
+    @action(detail=False, methods=['get'], url_path='my-ratings')
+    def my_ratings(self, request):
+        """
+        Lấy tất cả đánh giá gym mà user hiện tại đã tạo
+        GET /api/gym-ratings/my-ratings/
+        """
+        ratings = GymRating.objects.filter(user=request.user)
+        serializer = self.get_serializer(ratings, many=True)
+        return Response(serializer.data)
+
+    def get_queryset(self):
+        """
+        Cho phép filter theo gym_id nếu có trong query params
+        Ví dụ: GET /api/gym-ratings/?gym_id=1
+        """
+        queryset = GymRating.objects.all()
+        gym_id = self.request.query_params.get('gym_id')
+        if gym_id:
+            queryset = queryset.filter(gym_id=gym_id)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        """
+        Tạo đánh giá mới với gym_id từ body
+        """
+        gym_id = request.data.get('gym_id')
+        if not gym_id:
+            return Response(
+                {"error": "Thiếu gym_id trong request body"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Kiểm tra gym có tồn tại không
+        try:
+            gym = Gym.objects.get(id=gym_id)
+        except Gym.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Kiểm tra user đã đánh giá gym này chưa
+        if GymRating.objects.filter(user=request.user, gym_id=gym_id).exists():
+            return Response(
+                {"error": "Bạn đã đánh giá phòng gym này rồi"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Tạo data với gym_id
+        data = request.data.copy()
+        data['gym'] = gym_id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @action(detail=False, methods=['get'], url_path='gym-average')
+    def gym_average(self, request):
+        """
+        Lấy điểm trung bình của phòng gym
+        GET /api/gym-ratings/gym-average/?gym_id={gym_id}
+        """
+        gym_id = request.query_params.get('gym_id')
+        if not gym_id:
+            return Response(
+                {"error": "Thiếu gym_id trong query params"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            gym = Gym.objects.get(id=gym_id)
+        except Gym.DoesNotExist:
+            return Response(
+                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        ratings = GymRating.objects.filter(gym=gym)
+
+        if not ratings.exists():
+            return Response(
+                {
+                    "gym_id": int(gym_id),
+                    "gym_name": gym.name,
+                    "average_facility": 0,
+                    "average_service": 0,
+                    "average_overall": 0,
+                    "total_ratings": 0
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # Tính điểm trung bình
+        avg_facility = sum(r.facility_score for r in ratings) / ratings.count()
+        avg_service = sum(r.service_score for r in ratings) / ratings.count()
+        avg_overall = sum(r.score for r in ratings) / ratings.count()  # Sửa từ overall_score thành score
+
+        data = {
+            "gym_id": int(gym_id),
+            "gym_name": gym.name,
+            "average_facility": round(avg_facility, 1),
+            "average_service": round(avg_service, 1),
+            "average_overall": round(avg_overall, 1),
+            "total_ratings": ratings.count()
         }
 
         return Response(data, status=status.HTTP_200_OK)
@@ -2259,6 +2495,144 @@ class MoMoPaymentService:
             logger.error(f"MoMo JSON decode error: {str(e)}")
             return None
 
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MoMoIPNView(APIView):
+    """Xử lý IPN (Instant Payment Notification) từ MoMo"""
+    permission_classes = []
+
+    def post(self, request):
+        """Xử lý callback từ MoMo sau khi thanh toán"""
+        try:
+            data = request.data
+            logger.info(f"MoMo IPN received: {data}")
+
+            # Validate signature
+            config = settings.MOMO_CONFIG
+            raw_signature = (
+                f"accessKey={config['ACCESS_KEY']}"
+                f"&amount={data.get('amount', '')}"
+                f"&extraData={data.get('extraData', '')}"
+                f"&message={data.get('message', '')}"
+                f"&orderId={data.get('orderId', '')}"
+                f"&orderInfo={data.get('orderInfo', '')}"
+                f"&orderType={data.get('orderType', '')}"
+                f"&partnerCode={data.get('partnerCode', '')}"
+                f"&payType={data.get('payType', '')}"
+                f"&requestId={data.get('requestId', '')}"
+                f"&responseTime={data.get('responseTime', '')}"
+                f"&resultCode={data.get('resultCode', '')}"
+                f"&transId={data.get('transId', '')}"
+            )
+
+            expected_signature = MoMoPaymentService.create_signature(raw_signature)
+            received_signature = data.get('signature', '')
+
+            if expected_signature != received_signature:
+                logger.error("Invalid MoMo signature")
+                return JsonResponse({"status": "error", "message": "Invalid signature"})
+
+            # Tìm payment record
+            order_id = data.get('orderId')
+            try:
+                payment = Payment.objects.get(transaction_id=order_id)
+            except Payment.DoesNotExist:
+                logger.error(f"Payment not found for order_id: {order_id}")
+                return JsonResponse({"status": "error", "message": "Payment not found"})
+
+            # Cập nhật trạng thái thanh toán
+            result_code = data.get('resultCode')
+            if result_code == 0:  # Thành công
+                payment.status = 'completed'
+                payment.confirmed_date = timezone.now()
+                payment.transaction_id = data.get('transId', order_id)
+
+                # Cập nhật trạng thái subscription
+                subscription = payment.subscription
+                subscription.status = 'active'
+                subscription.save()
+
+                # Cập nhật hồ sơ thành viên với logic xử lý nhiều gói tập
+                try:
+                    member_profile = subscription.member.member_profile
+
+                    # So sánh và cập nhật ngày kết thúc nếu gói hiện tại có thời hạn lâu hơn
+                    if (not member_profile.membership_end_date or
+                            subscription.end_date > member_profile.membership_end_date):
+                        member_profile.membership_end_date = subscription.end_date
+
+                    member_profile.is_active = True
+                    member_profile.save()
+
+                except MemberProfile.DoesNotExist:
+                    # Tạo mới MemberProfile nếu chưa tồn tại
+                    MemberProfile.objects.create(
+                        user=subscription.member,
+                        membership_end_date=subscription.end_date,
+                        is_active=True
+                    )
+
+                # Thông báo cho hội viên
+                try:
+                    Notification.objects.create(
+                        user=subscription.member,
+                        title="Thanh toán MoMo thành công",
+                        message=f"Thanh toán cho gói tập {subscription.package.name} đã được xác nhận. Gói tập của bạn đã được kích hoạt.",
+                        notification_type="payment_confirmation",
+                        related_object_id=subscription.id
+                    )
+                except Exception as notification_error:
+                    logger.error(f"Failed to create notification: {notification_error}")
+
+                logger.info(f"Payment {payment.id} completed successfully via MoMo")
+            else:  # Thất bại
+                payment.status = 'failed'
+                logger.info(f"Payment {payment.id} failed with code: {result_code}")
+
+            payment.notes = f"MoMo response: {data.get('message', '')}"
+            payment.save()
+
+            return JsonResponse({"status": "success"})
+
+        except Exception as e:
+            logger.error(f"MoMo IPN error: {str(e)}")
+            return JsonResponse({"status": "error", "message": str(e)})
+@method_decorator(csrf_exempt, name='dispatch')
+class MoMoReturnView(APIView):
+    """Xử lý redirect từ MoMo sau khi user thanh toán xong"""
+    permission_classes = []
+
+    def get(self, request):
+        """Xử lý return URL từ MoMo"""
+        order_id = request.GET.get('orderId')
+        result_code = request.GET.get('resultCode')
+
+        try:
+            payment = Payment.objects.get(transaction_id=order_id)
+
+            if result_code == '0':
+                message = "Thanh toán thành công!"
+                payment_status = "completed"
+            else:
+                message = "Thanh toán thất bại!"
+                payment_status = "failed"
+
+            # Redirect về frontend với thông tin
+            frontend_url = f"https://c11e-171-231-61-11.ngrok-free.app/payment-result?status={payment_status}&message={message}&payment_id={payment.id}"
+
+            return JsonResponse({
+                "status": payment_status,
+                "message": message,
+                "payment_id": payment.id,
+                "redirect_url": frontend_url
+            })
+
+        except Payment.DoesNotExist:
+            return JsonResponse({
+                "status": "error",
+                "message": "Không tìm thấy thông tin thanh toán"
+            })
 
 class PaymentViewSet(viewsets.ViewSet):
     """ViewSet để quản lý thanh toán"""
@@ -2458,143 +2832,6 @@ class PaymentViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
-@method_decorator(csrf_exempt, name='dispatch')
-class MoMoIPNView(APIView):
-    """Xử lý IPN (Instant Payment Notification) từ MoMo"""
-    permission_classes = []
-
-    def post(self, request):
-        """Xử lý callback từ MoMo sau khi thanh toán"""
-        try:
-            data = request.data
-            logger.info(f"MoMo IPN received: {data}")
-
-            # Validate signature
-            config = settings.MOMO_CONFIG
-            raw_signature = (
-                f"accessKey={config['ACCESS_KEY']}"
-                f"&amount={data.get('amount', '')}"
-                f"&extraData={data.get('extraData', '')}"
-                f"&message={data.get('message', '')}"
-                f"&orderId={data.get('orderId', '')}"
-                f"&orderInfo={data.get('orderInfo', '')}"
-                f"&orderType={data.get('orderType', '')}"
-                f"&partnerCode={data.get('partnerCode', '')}"
-                f"&payType={data.get('payType', '')}"
-                f"&requestId={data.get('requestId', '')}"
-                f"&responseTime={data.get('responseTime', '')}"
-                f"&resultCode={data.get('resultCode', '')}"
-                f"&transId={data.get('transId', '')}"
-            )
-
-            expected_signature = MoMoPaymentService.create_signature(raw_signature)
-            received_signature = data.get('signature', '')
-
-            if expected_signature != received_signature:
-                logger.error("Invalid MoMo signature")
-                return JsonResponse({"status": "error", "message": "Invalid signature"})
-
-            # Tìm payment record
-            order_id = data.get('orderId')
-            try:
-                payment = Payment.objects.get(transaction_id=order_id)
-            except Payment.DoesNotExist:
-                logger.error(f"Payment not found for order_id: {order_id}")
-                return JsonResponse({"status": "error", "message": "Payment not found"})
-
-            # Cập nhật trạng thái thanh toán
-            result_code = data.get('resultCode')
-            if result_code == 0:  # Thành công
-                payment.status = 'completed'
-                payment.confirmed_date = timezone.now()
-                payment.transaction_id = data.get('transId', order_id)
-
-                # Cập nhật trạng thái subscription
-                subscription = payment.subscription
-                subscription.status = 'active'
-                subscription.save()
-
-                # Cập nhật hồ sơ thành viên với logic xử lý nhiều gói tập
-                try:
-                    member_profile = subscription.member.member_profile
-
-                    # So sánh và cập nhật ngày kết thúc nếu gói hiện tại có thời hạn lâu hơn
-                    if (not member_profile.membership_end_date or
-                            subscription.end_date > member_profile.membership_end_date):
-                        member_profile.membership_end_date = subscription.end_date
-
-                    member_profile.is_active = True
-                    member_profile.save()
-
-                except MemberProfile.DoesNotExist:
-                    # Tạo mới MemberProfile nếu chưa tồn tại
-                    MemberProfile.objects.create(
-                        user=subscription.member,
-                        membership_end_date=subscription.end_date,
-                        is_active=True
-                    )
-
-                # Thông báo cho hội viên
-                try:
-                    Notification.objects.create(
-                        user=subscription.member,
-                        title="Thanh toán MoMo thành công",
-                        message=f"Thanh toán cho gói tập {subscription.package.name} đã được xác nhận. Gói tập của bạn đã được kích hoạt.",
-                        notification_type="payment_confirmation",
-                        related_object_id=subscription.id
-                    )
-                except Exception as notification_error:
-                    logger.error(f"Failed to create notification: {notification_error}")
-
-                logger.info(f"Payment {payment.id} completed successfully via MoMo")
-            else:  # Thất bại
-                payment.status = 'failed'
-                logger.info(f"Payment {payment.id} failed with code: {result_code}")
-
-            payment.notes = f"MoMo response: {data.get('message', '')}"
-            payment.save()
-
-            return JsonResponse({"status": "success"})
-
-        except Exception as e:
-            logger.error(f"MoMo IPN error: {str(e)}")
-            return JsonResponse({"status": "error", "message": str(e)})
-@method_decorator(csrf_exempt, name='dispatch')
-class MoMoReturnView(APIView):
-    """Xử lý redirect từ MoMo sau khi user thanh toán xong"""
-    permission_classes = []
-
-    def get(self, request):
-        """Xử lý return URL từ MoMo"""
-        order_id = request.GET.get('orderId')
-        result_code = request.GET.get('resultCode')
-
-        try:
-            payment = Payment.objects.get(transaction_id=order_id)
-
-            if result_code == '0':
-                message = "Thanh toán thành công!"
-                payment_status = "completed"
-            else:
-                message = "Thanh toán thất bại!"
-                payment_status = "failed"
-
-            # Redirect về frontend với thông tin
-            frontend_url = f"https://c11e-171-231-61-11.ngrok-free.app/payment-result?status={payment_status}&message={message}&payment_id={payment.id}"
-
-            return JsonResponse({
-                "status": payment_status,
-                "message": message,
-                "payment_id": payment.id,
-                "redirect_url": frontend_url
-            })
-
-        except Payment.DoesNotExist:
-            return JsonResponse({
-                "status": "error",
-                "message": "Không tìm thấy thông tin thanh toán"
-            })
 
 class PaymentReceiptViewSet(viewsets.ViewSet):
     """ViewSet để quản lý biên lai thanh toán"""
@@ -2820,32 +3057,51 @@ class CreateVNPayPaymentView(APIView):
             )
 
 
+# Sửa lỗi trong VNPayIPNView
 @method_decorator(csrf_exempt, name='dispatch')
 class VNPayIPNView(APIView):
+    def get(self, request):
+        """Handle GET request from VNPay IPN"""
+        return self.handle_ipn_request(request, request.GET)
+
     def post(self, request):
-        print("=== VNPay IPN View Called ===")
-        print("Request data:", request.data)
-        print("Request headers:", request.headers)
+        """Handle POST request from VNPay IPN"""
+        return self.handle_ipn_request(request, request.POST)
+
+    def handle_ipn_request(self, request, data_source):
+        logger.info("=== VNPay IPN View Called ===")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Data: {dict(data_source)}")
+
         try:
-            # Chuyển đổi dữ liệu đầu vào
-            ipn_data = {}
-            for key, value in request.data.items():
-                if isinstance(value, list):
-                    ipn_data[key] = value[0]
-                else:
-                    ipn_data[key] = value
+            # Xử lý data từ GET hoặc POST
+            if request.content_type == 'application/json' and request.body:
+                import json
+                ipn_data = json.loads(request.body.decode('utf-8'))
+            else:
+                ipn_data = {}
+                for key, value in data_source.items():
+                    if isinstance(value, list):
+                        ipn_data[key] = value[0]
+                    else:
+                        ipn_data[key] = value
 
             logger.info(f"Processed IPN data: {ipn_data}")
 
+            # Kiểm tra nếu không có data (có thể là health check)
+            if not ipn_data or 'vnp_TxnRef' not in ipn_data:
+                logger.info("Empty IPN request - possibly health check")
+                return HttpResponse("00", content_type="text/plain")
+
+            # Validate data
             serializer = serializers.VNPayIPNSerializer(data=ipn_data)
             if not serializer.is_valid():
                 logger.error(f"Invalid VNPay IPN data: {serializer.errors}")
                 return HttpResponse("02", content_type="text/plain")
 
+            # Validate signature
             vnpay = VNPayUtils()
             is_valid, message = vnpay.validate_response(ipn_data)
-
-            logger.info(f"IPN Signature validation: {is_valid}, message: {message}")
 
             if not is_valid:
                 logger.error(f"Invalid VNPay IPN signature: {message}")
@@ -2856,94 +3112,76 @@ class VNPayIPNView(APIView):
             response_code = serializer.validated_data['vnp_ResponseCode']
             transaction_no = serializer.validated_data['vnp_TransactionNo']
 
-            logger.info(f"IPN Order ID: {order_id}, Amount: {amount}, Response Code: {response_code}")
-
-            # ✅ SỬA LỖI: VNPay có thể loại bỏ ký tự đặc biệt từ vnp_TxnRef
+            # Tìm payment
             try:
-                # Thử tìm chính xác trước
                 payment = Payment.objects.get(transaction_id=order_id)
                 logger.info(f"IPN Found payment: {payment.id}, status: {payment.status}")
             except Payment.DoesNotExist:
-                # Nếu không tìm thấy, thử tìm với các pattern khác
-                logger.warning(f"Payment with exact transaction_id {order_id} not found, trying alternatives...")
+                logger.error(f"IPN Payment with transaction_id {order_id} not found")
+                return HttpResponse("01", content_type="text/plain")
 
-                # Thử tìm payments gần đây có pattern tương tự
-                recent_payments = Payment.objects.filter(
-                    payment_method='vnpay',
-                    status='pending',
-                    created_at__gte=timezone.now() - timedelta(minutes=30)
-                )
-                import re
-                payment = None
-                for p in recent_payments:
-                    # Thử so sánh sau khi loại bỏ ký tự đặc biệt
-                    clean_transaction_id = re.sub(r'[^0-9]', '', p.transaction_id or '')
-                    clean_order_id = re.sub(r'[^0-9]', '', str(order_id))
+            # ✅ SỬA: VNPay trả về số tiền gốc, không cần chia cho 100
+            vnpay_amount = float(amount)  # VNPay trả về số tiền gốc
+            payment_amount = float(payment.amount)
 
-                    logger.info(f"Comparing: DB='{clean_transaction_id}' vs IPN='{clean_order_id}'")
+            logger.info(f"Raw VNPay amount: {amount}")
+            logger.info(f"VNPay amount (no conversion): {vnpay_amount}")
+            logger.info(f"Payment amount in DB: {payment_amount}")
 
-                    if clean_transaction_id == clean_order_id:
-                        payment = p
-                        logger.info(f"Found matching payment by pattern: {p.id}")
-                        break
+            logger.info(f"Amount comparison: VNPay={vnpay_amount}, Payment={payment_amount}")
 
-                if not payment:
-                    logger.error(f"IPN Payment with transaction_id {order_id} not found even with alternatives")
-                    # Log tất cả payments gần đây để debug
-                    for p in recent_payments:
-                        logger.error(f"Available payment: ID={p.id}, transaction_id='{p.transaction_id}'")
-                    return HttpResponse("01", content_type="text/plain")
-
-            # Kiểm tra số tiền (VNPay trả về số tiền x100)
-            vnpay_amount = float(amount) / 100
-            if float(payment.amount) != vnpay_amount:
-                logger.error(f"IPN Amount mismatch: expected {payment.amount}, got {vnpay_amount}")
+            if abs(payment_amount - vnpay_amount) > 0.01:  # Cho phép sai lệch nhỏ do làm tròn
+                logger.error(f"IPN Amount mismatch: expected {payment_amount}, got {vnpay_amount}")
                 return HttpResponse("04", content_type="text/plain")
 
-            # ✅ QUAN TRỌNG: Không ghi đè transaction_id nữa!
-            # Xử lý thành công
-            if response_code == '00' and payment.status == 'pending':
+            # Xử lý thành công - IPN có độ ưu tiên cao hơn Return URL
+            if response_code == '00':
                 logger.info("IPN Processing successful payment...")
+
                 with transaction.atomic():
-                    payment.status = 'completed'
-                    payment.confirmed_date = timezone.now()
-                    # ✅ Lưu VNPay transaction number vào trường riêng
-                    payment.vnpay_transaction_no = transaction_no
-                    payment.save()
+                    # Chỉ update nếu chưa completed
+                    if payment.status == 'pending':
+                        payment.status = 'completed'
+                        payment.vnpay_transaction_no = transaction_no
+                        payment.confirmed_date = timezone.now()
+                        payment.save()
 
-                    subscription = payment.subscription
-                    subscription.status = 'active'
-                    subscription.save()
+                        # Activate subscription
+                        subscription = payment.subscription
+                        subscription.status = 'active'
+                        subscription.save()
 
-                    # Cập nhật member profile (similar to return view)
-                    try:
-                        member_profile = subscription.member.member_profile
-                        if (not member_profile.membership_end_date or
-                                subscription.end_date > member_profile.membership_end_date):
-                            member_profile.membership_end_date = subscription.end_date
-                        member_profile.is_active = True
-                        member_profile.save()
-                    except MemberProfile.DoesNotExist:
-                        MemberProfile.objects.create(
+                        # Update member profile
+                        try:
+                            member_profile = subscription.member.member_profile
+                            if (not member_profile.membership_end_date or
+                                    subscription.end_date > member_profile.membership_end_date):
+                                member_profile.membership_end_date = subscription.end_date
+                            member_profile.is_active = True
+                            member_profile.save()
+                        except MemberProfile.DoesNotExist:
+                            MemberProfile.objects.create(
+                                user=subscription.member,
+                                membership_end_date=subscription.end_date,
+                                is_active=True
+                            )
+
+                        # Tạo thông báo
+                        Notification.objects.create(
                             user=subscription.member,
-                            membership_end_date=subscription.end_date,
-                            is_active=True
+                            title="Thanh toán thành công (IPN)",
+                            message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
+                            notification_type="payment_success"
                         )
 
-                    # Tạo thông báo
-                    Notification.objects.create(
-                        user=subscription.member,
-                        title="Thanh toán thành công (IPN)",
-                        message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
-                        notification_type="payment_success"
-                    )
+                        logger.info(f"IPN: Payment {payment.id} completed successfully")
+                    else:
+                        logger.info(f"IPN: Payment {payment.id} already processed")
 
-                logger.info(f"IPN: Payment {payment.id} completed successfully")
                 return HttpResponse("00", content_type="text/plain")
             else:
-                logger.warning(
-                    f"IPN Payment failed or not pending. Response code: {response_code}, Status: {payment.status}")
-                if payment.status == 'pending':  # Chỉ update nếu vẫn đang pending
+                logger.warning(f"IPN Payment failed. Response code: {response_code}")
+                if payment.status == 'pending':
                     payment.status = 'failed'
                     payment.save()
                 return HttpResponse("00", content_type="text/plain")
@@ -2951,7 +3189,119 @@ class VNPayIPNView(APIView):
         except Exception as e:
             logger.error(f"Error processing VNPay IPN: {str(e)}", exc_info=True)
             return HttpResponse("99", content_type="text/plain")
-#
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class VNPayReturnView(APIView):
+    def get(self, request):
+        logger.info("=== VNPay Return View Called ===")
+        logger.info(f"GET params: {dict(request.GET)}")
+
+        try:
+            return_data = {}
+            for key, value in request.GET.items():
+                if isinstance(value, list):
+                    return_data[key] = value[0]
+                else:
+                    return_data[key] = value
+
+            logger.info(f"Processed return_data: {return_data}")
+
+            serializer = serializers.VNPayReturnSerializer(data=return_data)
+            if not serializer.is_valid():
+                logger.error(f"Invalid VNPay return data: {serializer.errors}")
+                return HttpResponseRedirect("/payment/failed?error=invalid_data")
+
+            vnpay = VNPayUtils()
+            is_valid, message = vnpay.validate_response(return_data)
+
+            if not is_valid:
+                logger.error(f"Invalid VNPay signature: {message}")
+                return HttpResponseRedirect("/payment/failed?error=invalid_signature")
+
+            order_id = serializer.validated_data['vnp_TxnRef']
+            amount = serializer.validated_data['vnp_Amount']
+            response_code = serializer.validated_data['vnp_ResponseCode']
+            transaction_no = serializer.validated_data['vnp_TransactionNo']
+
+            # Tìm payment
+            try:
+                payment = Payment.objects.get(transaction_id=order_id)
+                logger.info(f"Found payment: {payment.id}, status: {payment.status}")
+            except Payment.DoesNotExist:
+                logger.error(f"Payment with transaction_id {order_id} not found")
+                return HttpResponseRedirect("/payment/failed?error=payment_not_found")
+
+            # ✅ SỬA: VNPay trả về số tiền gốc, không cần chia cho 100
+            vnpay_amount = float(amount)  # VNPay trả về số tiền gốc
+            payment_amount = float(payment.amount)
+
+            logger.info(f"Raw VNPay amount: {amount}")
+            logger.info(f"VNPay amount (no conversion): {vnpay_amount}")
+            logger.info(f"Payment amount in DB: {payment_amount}")
+
+            logger.info(f"Return Amount comparison: VNPay={vnpay_amount}, Payment={payment_amount}")
+
+            if abs(payment_amount - vnpay_amount) > 0.01:  # Cho phép sai lệch nhỏ do làm tròn
+                logger.error(f"Amount mismatch: expected {payment_amount}, got {vnpay_amount}")
+                return HttpResponseRedirect("/payment/failed?error=amount_mismatch")
+
+            # ✅ SỬA: Chỉ xử lý nếu chưa được xử lý (tránh xung đột với IPN)
+            if response_code == '00' and payment.status == 'pending':
+                logger.info("Return: Processing successful payment...")
+
+                with transaction.atomic():
+                    payment.status = 'completed'
+                    payment.vnpay_transaction_no = transaction_no
+                    payment.confirmed_date = timezone.now()
+                    payment.save()
+
+                    # Activate subscription
+                    subscription = payment.subscription
+                    if subscription.status != 'active':
+                        subscription.status = 'active'
+                        subscription.save()
+
+                        # Update member profile
+                        try:
+                            member_profile = subscription.member.member_profile
+                            if (not member_profile.membership_end_date or
+                                    subscription.end_date > member_profile.membership_end_date):
+                                member_profile.membership_end_date = subscription.end_date
+                            member_profile.is_active = True
+                            member_profile.save()
+                        except MemberProfile.DoesNotExist:
+                            MemberProfile.objects.create(
+                                user=subscription.member,
+                                membership_end_date=subscription.end_date,
+                                is_active=True
+                            )
+
+                        # Tạo thông báo
+                        Notification.objects.create(
+                            user=subscription.member,
+                            title="Thanh toán thành công",
+                            message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
+                            notification_type="payment_success"
+                        )
+
+                logger.info("Return: Payment processing completed successfully")
+                return HttpResponseRedirect("/payment/success")
+
+            elif payment.status == 'completed':
+                logger.info("Return: Payment already processed by IPN")
+                return HttpResponseRedirect("/payment/success")
+
+            else:
+                logger.warning(f"Return: Payment failed. Response code: {response_code}")
+                if payment.status == 'pending':
+                    payment.status = 'failed'
+                    payment.save()
+                return HttpResponseRedirect(f"/payment/failed?error={response_code}")
+
+        except Exception as e:
+            logger.error(f"Error in VNPay return: {str(e)}", exc_info=True)
+            return HttpResponseRedirect("/payment/failed?error=system_error")
 # class CreateVNPayPaymentView(APIView):
 #     """
 #     API tạo thanh toán VNPay - Modified for testing
@@ -3136,116 +3486,6 @@ class VNPayIPNView(APIView):
 #                 },
 #                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
 #             )
-@method_decorator(csrf_exempt, name='dispatch')
-class VNPayReturnView(APIView):
-    def get(self, request):
-        # Debug log
-        logger.info("=== VNPay Return View Called ===")
-        logger.info(f"GET params: {dict(request.GET)}")
-
-        try:
-            # Chuyển đổi QueryDict thành dict thường
-            return_data = {}
-            for key, value in request.GET.items():
-                if isinstance(value, list):
-                    return_data[key] = value[0]
-                else:
-                    return_data[key] = value
-
-            logger.info(f"Processed return_data: {return_data}")
-
-            serializer = serializers.VNPayReturnSerializer(data=return_data)
-            if not serializer.is_valid():
-                logger.error(f"Invalid VNPay return data: {serializer.errors}")
-                return HttpResponseRedirect("/payment/failed?error=invalid_data")
-
-            vnpay = VNPayUtils()
-            is_valid, message = vnpay.validate_response(return_data)
-
-            logger.info(f"Signature validation: {is_valid}, message: {message}")
-
-            if not is_valid:
-                logger.error(f"Invalid VNPay signature: {message}")
-                return HttpResponseRedirect("/payment/failed?error=invalid_signature")
-
-            order_id = serializer.validated_data['vnp_TxnRef']
-            amount = serializer.validated_data['vnp_Amount']
-            response_code = serializer.validated_data['vnp_ResponseCode']
-            transaction_no = serializer.validated_data['vnp_TransactionNo']
-
-            logger.info(f"Order ID: {order_id}, Amount: {amount}, Response Code: {response_code}")
-
-            # SỬA LỖI: Dùng transaction_id thay vì id
-            try:
-                payment = Payment.objects.get(transaction_id=order_id)
-                logger.info(f"Found payment: {payment.id}, status: {payment.status}")
-            except Payment.DoesNotExist:
-                logger.error(f"Payment with transaction_id {order_id} not found")
-                return HttpResponseRedirect("/payment/failed?error=payment_not_found")
-
-            # Kiểm tra số tiền (VNPay trả về số tiền x100)
-            vnpay_amount = float(amount) / 100  # VNPay trả về amount x100
-            if float(payment.amount) != vnpay_amount:
-                logger.error(f"Amount mismatch: expected {payment.amount}, got {vnpay_amount}")
-                return HttpResponseRedirect("/payment/failed?error=amount_mismatch")
-
-            # Xử lý thành công
-            if response_code == '00' and payment.status == 'pending':
-                logger.info("Processing successful payment...")
-                with transaction.atomic():
-                    payment.status = 'completed'
-                    payment.transaction_id = transaction_no  # Cập nhật với transaction number từ VNPay
-                    payment.confirmed_date = timezone.now()
-                    payment.save()
-
-                    logger.info(f"Payment {payment.id} updated to completed")
-
-                    subscription = payment.subscription
-                    subscription.status = 'active'
-                    subscription.save()
-
-                    logger.info(f"Subscription {subscription.id} activated")
-
-                    # Cập nhật member profile
-                    try:
-                        member_profile = subscription.member.member_profile
-                        if (not member_profile.membership_end_date or
-                                subscription.end_date > member_profile.membership_end_date):
-                            member_profile.membership_end_date = subscription.end_date
-                        member_profile.is_active = True
-                        member_profile.save()
-                        logger.info(f"Member profile updated")
-                    except MemberProfile.DoesNotExist:
-                        MemberProfile.objects.create(
-                            user=subscription.member,
-                            membership_end_date=subscription.end_date,
-                            is_active=True
-                        )
-                        logger.info(f"New member profile created")
-
-                    # Tạo thông báo
-                    Notification.objects.create(
-                        user=subscription.member,
-                        title="Thanh toán thành công",
-                        message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất",
-                        notification_type="payment_success"
-                    )
-                    logger.info(f"Notification created")
-
-                logger.info("=== Payment processing completed successfully ===")
-                return HttpResponseRedirect("/payment/success")
-            else:
-                logger.warning(
-                    f"Payment failed or not pending. Response code: {response_code}, Status: {payment.status}")
-                payment.status = 'failed'
-                payment.save()
-                return HttpResponseRedirect(f"/payment/failed?error={response_code}")
-
-        except Exception as e:
-            logger.error(f"Error in VNPay return: {str(e)}", exc_info=True)
-            return HttpResponseRedirect("/payment/failed?error=system_error")
-
-
 from django.db import models
 
 class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
@@ -3298,3 +3538,13 @@ class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
             ).count()
         }
         return Response(stats)
+
+
+class GymListView(generics.ListAPIView, viewsets.ViewSet):
+    """
+    API endpoint để lấy danh sách phòng gym
+    GET /api/gyms/
+    """
+    queryset = Gym.objects.all()
+    serializer_class = serializers.GymSerializer
+    permission_classes = [permissions.IsAuthenticated]

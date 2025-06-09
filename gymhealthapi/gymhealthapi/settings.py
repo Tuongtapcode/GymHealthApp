@@ -54,8 +54,8 @@ VNPAY_CONFIG = {
     'HASH_SECRET': 'V3025B1XYEAPJFBN9FSXWEXIC52YRTMM',  # ✔ Đúng theo email
     'URL': 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
     'API_URL': 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
-    'RETURN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/vnpay/return/',
-    'IPN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/vnpay/ipn/',
+    'RETURN_URL': 'https://8983-171-231-61-11.ngrok-free.app/api/payments/vnpay/return/',
+    'IPN_URL': 'https://8983-171-231-61-11.ngrok-free.app/api/payments/vnpay/ipn/',
     'VERSION': '2.1.0',
     'COMMAND': 'pay',
     'CURR_CODE': 'VND',
@@ -74,34 +74,46 @@ MOMO_CONFIG = {
     'AUTO_CAPTURE': True,
     'LANG': 'vi',
     # URLs callback
-    'REDIRECT_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/momo/return/',
-    'IPN_URL': 'https://27d2-171-231-61-11.ngrok-free.app/api/payments/momo/ipn/',
+    'REDIRECT_URL': 'https://cc89-171-231-61-11.ngrok-free.app/api/payments/momo/return/',
+    'IPN_URL': 'https://cc89-171-231-61-11.ngrok-free.app/api/payments/momo/ipn/',
 }
-
+import os
+# Thêm logging chi tiết hơn
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'file': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
-            'filename': 'momo_payments.log',
+            'filename': 'vnpay.log',
+            'formatter': 'verbose',
         },
         'console': {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
         },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': 'INFO',
     },
     'loggers': {
-        'your_app.views': {  # Thay 'your_app' bằng tên app của bạn
+        'vnpay': {
             'handlers': ['file', 'console'],
             'level': 'INFO',
-            'propagate': True,
+            'propagate': False,
+
         },
     },
-
 }
-
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 
 REST_FRAMEWORK = {
@@ -160,13 +172,16 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'gymhealthapi.middleware.VNPayCORSMiddleware'
 ]
 AUTH_USER_MODEL = 'gymhealth.User'
 
 import pymysql
 ALLOWED_HOSTS=['*']
 CSRF_TRUSTED_ORIGINS = [
-    'https://c11e-171-231-61-11.ngrok-free.app',
+    'https://sandbox.vnpayment.vn',
+    'https://8983-171-231-61-11.ngrok-free.app/',  # URL ngrok hiện tại
+    'https://sandbox.vnpayment.vn/vnpaygw-sit-testing/order',
 ]
 pymysql.install_as_MySQLdb()
 ROOT_URLCONF = 'gymhealthapi.urls'

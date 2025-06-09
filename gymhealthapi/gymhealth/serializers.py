@@ -390,6 +390,33 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
             'notes': {'required': False},
         }
 
+    def validate_session_date(self, value):
+        """Validate session_date phải trong thời hạn thành viên"""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return value
+
+        try:
+            member_profile = request.user.member_profile
+
+            # Kiểm tra ngày đăng ký buổi tập phải <= ngày kết thúc thành viên
+            if member_profile.membership_end_date and value > member_profile.membership_end_date:
+                raise ValidationError(
+                    f"Không thể đăng ký buổi tập sau ngày {member_profile.membership_end_date.strftime('%d/%m/%Y')}. "
+                    f"Thời hạn thành viên của bạn sẽ kết thúc vào ngày này."
+                )
+
+        except AttributeError:
+            # Trường hợp user chưa có member_profile
+            raise ValidationError("Bạn chưa có hồ sơ thành viên.")
+
+        return value
+
+    def validate(self, data):
+        """Additional validation for the entire object"""
+        # Có thể thêm các validation khác ở đây nếu cần
+        return data
+
     def validate(self, data):
         """Kiểm tra tính hợp lệ của dữ liệu đầu vào"""
         # Kiểm tra ngày tập phải là ngày trong tương lai
@@ -837,8 +864,7 @@ class GymRatingSerializer(ModelSerializer):
         # Gán user hiện tại là người tạo đánh giá
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
-
-
+# Serializer cho FeedbackResponse
 class FeedbackResponseSerializer(ModelSerializer):
     responder_details = UserBasicSerializer(source='responder', read_only=True)
 
@@ -1185,3 +1211,11 @@ class PromotionSerializer(ModelSerializer):
             'created_at', 'updated_at'
         ]
 
+class GymSerializer(ModelSerializer):
+    """
+    Serializer đơn giản cho model Gym
+    """
+    class Meta:
+        model = Gym
+        fields = ['id', 'name', 'address', 'phone', 'description']
+        read_only_fields = ['id']

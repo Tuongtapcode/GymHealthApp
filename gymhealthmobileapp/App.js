@@ -34,6 +34,7 @@ import ProgressNavigator from "./components/Home/Progress/ProgressNavigator";
 import Trainer from "./components/Trainer/Trainer";
 import TrainingProgress from "./components/Trainer/TrainingProgress";
 import ChatScreen from "./components/Firebase/ChatScreen";
+import TrainerRatingsScreen from "./components/Trainer/TrainerRatingsScreen";
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -224,6 +225,20 @@ const TrainerTabNavigator = ({ user, updateUser }) => {
         )}
       </Tab.Screen>
 
+      {/* Tab mới cho đánh giá */}
+      <Tab.Screen
+        name="ratings"
+        options={{
+          title: "Đánh giá",
+          headerTitle: "Đánh giá của tôi",
+          tabBarIcon: ({ color, size }) => (
+            <Icon size={size} color={color} name="star" />
+          ),
+        }}
+      >
+        {(props) => <TrainerRatingsScreen {...props} user={user} />}
+      </Tab.Screen>
+
       <Tab.Screen
         name="profile"
         options={{
@@ -240,6 +255,7 @@ const TrainerTabNavigator = ({ user, updateUser }) => {
     </Tab.Navigator>
   );
 };
+
 // Main Tab Navigator với điều kiện hiển thị dựa trên role
 const MainTabNavigator = () => {
   const [user, setUser] = useState(null);

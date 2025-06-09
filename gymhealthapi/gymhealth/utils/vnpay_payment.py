@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-    
+
 class VNPayUtils:
     def __init__(self):
         self.tmn_code = settings.VNPAY_CONFIG['TMN_CODE']

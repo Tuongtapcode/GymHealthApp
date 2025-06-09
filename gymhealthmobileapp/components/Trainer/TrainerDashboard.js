@@ -9,6 +9,7 @@ import {
   RefreshControl,
   FlatList,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
@@ -25,7 +26,7 @@ const TrainerDashboard = ({ navigation }) => {
     monthly_stats: { stats: {} },
     recent_week_stats: {},
     top_members: [],
-    upcoming_sessions: []
+    upcoming_sessions: [],
   });
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,10 +44,7 @@ const TrainerDashboard = ({ navigation }) => {
       const api = authAPI(accessToken);
 
       // Load all data concurrently
-      await Promise.all([
-        loadTodaySchedule(api),
-        loadDashboardStats(api)
-      ]);
+      await Promise.all([loadTodaySchedule(api), loadDashboardStats(api)]);
     } catch (error) {
       console.error("Error loading dashboard data:", error);
       Alert.alert("Lỗi", "Không thể tải dữ liệu trang chủ");
@@ -57,7 +55,9 @@ const TrainerDashboard = ({ navigation }) => {
 
   const loadTodaySchedule = async (api) => {
     try {
-      const response = await api.get(`${endpoints.workoutSessions}trainer/today-schedule/`);
+      const response = await api.get(
+        `${endpoints.workoutSessions}trainer/today-schedule/`
+      );
       setTodaySchedule(response.data.sessions || []);
     } catch (error) {
       console.error("Error loading today schedule:", error);
@@ -66,7 +66,9 @@ const TrainerDashboard = ({ navigation }) => {
 
   const loadDashboardStats = async (api) => {
     try {
-      const response = await api.get(`${endpoints.workoutSessions}trainer/dashboard-stats/`);
+      const response = await api.get(
+        `${endpoints.workoutSessions}trainer/dashboard-stats/`
+      );
       setDashboardStats(response.data);
     } catch (error) {
       console.error("Error loading dashboard stats:", error);
@@ -164,13 +166,18 @@ const TrainerDashboard = ({ navigation }) => {
           {item.session_type_display || item.exercise_type || "Tập cá nhân"}
         </Text>
         <View style={styles.statusContainer}>
-          <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
+          <View
+            style={[
+              styles.statusDot,
+              { backgroundColor: getStatusColor(item.status) },
+            ]}
+          />
           <Text style={[styles.status, { color: getStatusColor(item.status) }]}>
             {getStatusText(item.status)}
           </Text>
         </View>
       </View>
-      {item.status === 'pending' && (
+      {item.status === "pending" && (
         <View style={styles.requestActions}>
           <TouchableOpacity
             style={[styles.actionButton, styles.approveButton]}
@@ -188,9 +195,7 @@ const TrainerDashboard = ({ navigation }) => {
       )}
       <TouchableOpacity
         style={styles.detailButton}
-        onPress={() =>
-          navigation.navigate("SessionDetail", { sessionId: item.id })
-        }
+        onPress={() => navigation.navigate("schedule", { sessionId: item.id })}
       >
         <Icon name="arrow-forward-ios" size={16} color="#666" />
       </TouchableOpacity>
@@ -243,7 +248,9 @@ const TrainerDashboard = ({ navigation }) => {
   }
 
   const pendingCount = dashboardStats.overview.status_breakdown.pending || 0;
-  const currentMonth = new Date().toLocaleDateString("vi-VN", { month: "long" });
+  const currentMonth = new Date().toLocaleDateString("vi-VN", {
+    month: "long",
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -264,12 +271,18 @@ const TrainerDashboard = ({ navigation }) => {
           </View>
           <TouchableOpacity
             style={styles.profileButton}
-            onPress={() => navigation.navigate("TrainerProfile")}
+            onPress={() => navigation.navigate("profile")}
           >
-            <Icon name="person" size={24} color="#4CAF50" />
+            {userFromRedux?.avatar && userFromRedux.avatar !== "" ? (
+              <Image
+                source={{ uri: userFromRedux.avatar }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <Icon name="person" size={24} color="#4CAF50" />
+            )}
           </TouchableOpacity>
         </View>
-
         {/* Overview Statistics */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tổng quan</Text>
@@ -297,7 +310,9 @@ const TrainerDashboard = ({ navigation }) => {
               value={dashboardStats.monthly_stats.stats.total || 0}
               icon="calendar-month"
               color="#9C27B0"
-              subtitle={`${dashboardStats.monthly_stats.stats.completed || 0} hoàn thành`}
+              subtitle={`${
+                dashboardStats.monthly_stats.stats.completed || 0
+              } hoàn thành`}
             />
           </View>
         </View>
@@ -307,15 +322,21 @@ const TrainerDashboard = ({ navigation }) => {
           <Text style={styles.sectionTitle}>7 ngày qua</Text>
           <View style={styles.weekStatsContainer}>
             <View style={styles.weekStatItem}>
-              <Text style={styles.weekStatValue}>{dashboardStats.recent_week_stats.total || 0}</Text>
+              <Text style={styles.weekStatValue}>
+                {dashboardStats.recent_week_stats.total || 0}
+              </Text>
               <Text style={styles.weekStatLabel}>Tổng buổi</Text>
             </View>
             <View style={styles.weekStatItem}>
-              <Text style={styles.weekStatValue}>{dashboardStats.recent_week_stats.completed || 0}</Text>
+              <Text style={styles.weekStatValue}>
+                {dashboardStats.recent_week_stats.completed || 0}
+              </Text>
               <Text style={styles.weekStatLabel}>Hoàn thành</Text>
             </View>
             <View style={styles.weekStatItem}>
-              <Text style={styles.weekStatValue}>{dashboardStats.recent_week_stats.upcoming || 0}</Text>
+              <Text style={styles.weekStatValue}>
+                {dashboardStats.recent_week_stats.upcoming || 0}
+              </Text>
               <Text style={styles.weekStatLabel}>Sắp tới</Text>
             </View>
           </View>
@@ -325,7 +346,7 @@ const TrainerDashboard = ({ navigation }) => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Lịch tập hôm nay</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("Schedule")}>
+            <TouchableOpacity onPress={() => navigation.navigate("schedule")}>
               <Text style={styles.viewAllText}>Xem tất cả</Text>
             </TouchableOpacity>
           </View>
@@ -368,7 +389,9 @@ const TrainerDashboard = ({ navigation }) => {
             <Text style={styles.sectionTitle}>Học viên tích cực nhất</Text>
             <FlatList
               data={dashboardStats.top_members}
-              renderItem={({ item, index }) => <TopMemberItem item={item} index={index} />}
+              renderItem={({ item, index }) => (
+                <TopMemberItem item={item} index={index} />
+              )}
               keyExtractor={(item, index) => index.toString()}
               scrollEnabled={false}
             />
@@ -381,28 +404,28 @@ const TrainerDashboard = ({ navigation }) => {
           <View style={styles.quickActions}>
             <TouchableOpacity
               style={styles.actionCard}
-              onPress={() => navigation.navigate("AllSessions")}
+              onPress={() => navigation.navigate("schedule")}
             >
               <Icon name="list" size={32} color="#4CAF50" />
               <Text style={styles.actionText}>Tất cả lịch tập</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.actionCard}
-              onPress={() => navigation.navigate("Schedule")}
+              onPress={() => navigation.navigate("schedule")}
             >
               <Icon name="schedule" size={32} color="#2196F3" />
               <Text style={styles.actionText}>Quản lý lịch</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.actionCard}
-              onPress={() => navigation.navigate("Statistics")}
+              onPress={() => navigation.navigate("ratings")}
             >
               <Icon name="analytics" size={32} color="#FF9800" />
-              <Text style={styles.actionText}>Thống kê</Text>
+              <Text style={styles.actionText}>Đánh giá</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.actionCard}
-              onPress={() => navigation.navigate("MemberList")}
+              onPress={() => navigation.navigate("dashboard")}
             >
               <Icon name="group" size={32} color="#9C27B0" />
               <Text style={styles.actionText}>Học viên</Text>
@@ -686,6 +709,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
     fontWeight: "500",
+  },
+  profileImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25, // làm tròn ảnh
+  },
+  profileButton: {
+    // ... style hiện tại
+    // có thể thêm padding để đảm bảo touch area đủ lớn
+    padding: 8,
   },
 });
 

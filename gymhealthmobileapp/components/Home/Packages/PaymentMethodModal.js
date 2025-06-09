@@ -20,7 +20,6 @@ const PaymentMethodModal = ({
   packageInfo,
 }) => {
   const [selectedMethod, setSelectedMethod] = useState("momo");
-  const [selectedBank, setSelectedBank] = useState("ALL"); // *** SỬA: Mặc định là "ALL" ***
 
   const paymentMethods = [
     {
@@ -39,41 +38,18 @@ const PaymentMethodModal = ({
     },
   ];
 
-  const popularBanks = [
-    { code: "VIETCOMBANK", name: "Vietcombank", color: "#007A33" },
-    { code: "TECHCOMBANK", name: "Techcombank", color: "#FF6B35" },
-    { code: "BIDV", name: "BIDV", color: "#1E4A8C" },
-    { code: "AGRIBANK", name: "Agribank", color: "#00A651" },
-    { code: "MBBANK", name: "MB Bank", color: "#FF6B00" },
-    { code: "ACB", name: "ACB", color: "#1BA1E2" },
-    { code: "VIETINBANK", name: "VietinBank", color: "#E30613" },
-    { code: "SACOMBANK", name: "Sacombank", color: "#0066CC" },
-  ];
-
   const handleConfirmPayment = () => {
-    // *** SỬA: Logic xử lý chọn bank cho VNPay ***
+    // VNPay luôn không truyền bankCode (mặc định tất cả ngân hàng)
     let bankCode = null;
 
     if (selectedMethod === "vnpay") {
-      // Nếu chọn "ALL" thì không truyền bankCode (để người dùng chọn trên trang VNPay)
-      // Nếu chọn ngân hàng cụ thể thì truyền bankCode
-      bankCode = selectedBank === "ALL" ? null : selectedBank;
+      bankCode = null; // Luôn để null để người dùng chọn trên trang VNPay
     }
 
     onSelectPayment({
       method: selectedMethod,
       bankCode: bankCode,
     });
-  };
-
-  // *** SỬA: Reset selectedBank khi chuyển method ***
-  const handleMethodChange = (methodId) => {
-    setSelectedMethod(methodId);
-    if (methodId === "vnpay") {
-      setSelectedBank("ALL"); // Mặc định chọn "Tất cả ngân hàng"
-    } else {
-      setSelectedBank("ALL");
-    }
   };
 
   return (
@@ -113,7 +89,7 @@ const PaymentMethodModal = ({
                     selectedMethod === method.id &&
                       styles.selectedPaymentMethod,
                   ]}
-                  onPress={() => handleMethodChange(method.id)}
+                  onPress={() => setSelectedMethod(method.id)}
                 >
                   <View style={styles.methodContent}>
                     <View style={styles.methodIcon}>
@@ -146,80 +122,12 @@ const PaymentMethodModal = ({
               ))}
             </View>
 
-            {/* Bank Selection for VNPay */}
-            {selectedMethod === "vnpay" && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Chọn ngân hàng</Text>
-
-                {/* *** SỬA: Đặt option "Tất cả ngân hàng" lên đầu *** */}
-                <TouchableOpacity
-                  style={[
-                    styles.bankItem,
-                    styles.noBankOption,
-                    selectedBank === "ALL" && styles.selectedBank,
-                  ]}
-                  onPress={() => setSelectedBank("ALL")}
-                >
-                  <Text style={styles.bankName}>Tất cả ngân hàng</Text>
-                  <Text style={styles.noBankText}>
-                    Chọn ngân hàng trên trang thanh toán VNPay
-                  </Text>
-                  {selectedBank === "ALL" && (
-                    <View
-                      style={[
-                        styles.bankSelectedIndicator,
-                        { backgroundColor: "#0066CC" },
-                      ]}
-                    >
-                      <Text style={styles.bankSelectedText}>✓</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                <View style={styles.bankGrid}>
-                  {popularBanks.map((bank) => (
-                    <TouchableOpacity
-                      key={bank.code}
-                      style={[
-                        styles.bankItem,
-                        selectedBank === bank.code && styles.selectedBank,
-                        { borderColor: bank.color },
-                      ]}
-                      onPress={() => setSelectedBank(bank.code)}
-                    >
-                      <Text style={styles.bankName}>{bank.name}</Text>
-                      {selectedBank === bank.code && (
-                        <View
-                          style={[
-                            styles.bankSelectedIndicator,
-                            { backgroundColor: bank.color },
-                          ]}
-                        >
-                          <Text style={styles.bankSelectedText}>✓</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-
             {/* Payment Info */}
             <View style={styles.paymentSummary}>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Phương thức:</Text>
                 <Text style={styles.summaryValue}>
                   {paymentMethods.find((m) => m.id === selectedMethod)?.name}
-                  {selectedMethod === "vnpay" &&
-                    selectedBank &&
-                    selectedBank !== "ALL" &&
-                    ` - ${
-                      popularBanks.find((b) => b.code === selectedBank)?.name ||
-                      selectedBank
-                    }`}
-                  {selectedMethod === "vnpay" &&
-                    selectedBank === "ALL" &&
-                    ` - Tất cả ngân hàng`}
                 </Text>
               </View>
               <View style={styles.summaryRow}>
@@ -256,7 +164,6 @@ const PaymentMethodModal = ({
   );
 };
 
-// Styles giữ nguyên như cũ
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
@@ -383,59 +290,6 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-  },
-  bankGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  bankItem: {
-    width: (width - 60) / 2 - 5,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: "#e0e0e0",
-    borderRadius: 8,
-    marginBottom: 10,
-    backgroundColor: "#fff",
-    position: "relative",
-    minHeight: 60,
-    justifyContent: "center",
-  },
-  selectedBank: {
-    borderColor: "#1a73e8",
-    backgroundColor: "#f0f7ff",
-  },
-  bankName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-    textAlign: "center",
-  },
-  noBankOption: {
-    width: width - 60,
-    marginBottom: 15,
-  },
-  noBankText: {
-    fontSize: 12,
-    color: "#666",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  bankSelectedIndicator: {
-    position: "absolute",
-    top: -5,
-    right: -5,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#1a73e8",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  bankSelectedText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "bold",
   },
   paymentSummary: {
     margin: 20,

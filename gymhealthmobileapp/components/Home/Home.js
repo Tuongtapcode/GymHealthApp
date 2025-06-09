@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -26,6 +27,7 @@ const Home = ({ navigation }) => {
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   // ...existing code...
   const [upcomingSchedule, setUpcomingSchedule] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -37,6 +39,30 @@ const Home = ({ navigation }) => {
     useState(false);
   // Lấy thông tin người dùng từ Redux store
   const userFromRedux = useSelector((state) => state.user);
+
+  // Cuộn thong báo:
+  const scrollViewRef = useRef(null);
+  const notificationSectionRef = useRef(null);
+
+  // 3. Thêm function để cuộn đến phần thông báo
+  const scrollToNotifications = () => {
+    if (notificationSectionRef.current) {
+      notificationSectionRef.current.measureLayout(
+        scrollViewRef.current,
+        (x, y) => {
+          scrollViewRef.current.scrollTo({
+            y: y - 20, // Trừ 20px để có khoảng cách từ top
+            animated: true,
+          });
+        },
+        () => {
+          // Fallback nếu measureLayout fail
+          console.log("Failed to measure notification section layout");
+        }
+      );
+    }
+  };
+
   const handleNotificationReadFromModal = (notificationId) => {
     if (notificationId === "all") {
       // Cập nhật tất cả thông báo thành đã đọc
@@ -1095,7 +1121,24 @@ const Home = ({ navigation }) => {
       </View>
     );
   };
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
 
+    try {
+      // Gọi lại tất cả các API để tải dữ liệu mới
+      await Promise.all([
+        fetchActiveSubscription(),
+        fetchUpcomingSchedules(),
+        fetchTrainingProgress(),
+        fetchNotifications(),
+      ]);
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+      Alert.alert("Lỗi", "Không thể làm mới dữ liệu");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
   const NotificationsSection = () => {
     if (notificationsLoading) {
       return (
@@ -1192,7 +1235,7 @@ const Home = ({ navigation }) => {
                   : "/api/placeholder/40/40",
             }}
             style={styles.avatar}
-          />  
+          />
           <View>
             <Text style={styles.welcomeText}>Xin chào,</Text>
             <Text style={styles.userName}>
@@ -1204,7 +1247,7 @@ const Home = ({ navigation }) => {
         </View>
         <TouchableOpacity
           style={styles.notificationButton}
-          onPress={() => navigation.navigate("Notifications")}
+          onPress={scrollToNotifications} // Thay đổi từ navigate thành scrollToNotifications
         >
           <Text style={styles.bellIcon}>🔔</Text>
           {unreadCount > 0 && (
@@ -1216,11 +1259,30 @@ const Home = ({ navigation }) => {
       </View>
 
       {/* Main Content */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollViewRef} // Thêm ref
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#1a73e8"]}
+            tintColor="#1a73e8"
+            title="Đang làm mới..."
+            titleColor="#666666"
+          />
+        }
+      >
         <CurrentPackage />
         <UpcomingSession />
         <ProgressSection />
-        <NotificationsSection />
+
+        {/* 6. Wrap NotificationsSection với View có ref */}
+        <View ref={notificationSectionRef}>
+          <NotificationsSection />
+        </View>
+
         <AllNotificationsModal
           visible={showAllNotificationsModal}
           onClose={() => setShowAllNotificationsModal(false)}

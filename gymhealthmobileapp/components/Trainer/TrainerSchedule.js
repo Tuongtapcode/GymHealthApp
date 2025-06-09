@@ -19,7 +19,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
-const TrainerSchedule = ({ navigation }) => {
+const   TrainerSchedule = ({ navigation }) => {
   const userFromRedux = useSelector((state) => state.user);
 
   const [sessions, setSessions] = useState([]);

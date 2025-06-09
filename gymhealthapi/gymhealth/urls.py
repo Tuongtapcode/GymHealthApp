@@ -18,7 +18,7 @@ router.register(r'feedback-response', views.FeedbackResponseViewSet, basename='f
 router.register(r'payments', views.PaymentViewSet, basename='payment')
 router.register(r'payment-receipts', views.PaymentReceiptViewSet, basename='payment-receipt')
 router.register(r'notifications', views.NotificationViewSet)
-
+router.register(r'gyms', views.GymListView, basename='gym')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -31,9 +31,12 @@ urlpatterns = [
          name='trainer-upcoming-sessions'),
         path('api/payments/momo/ipn/', views.MoMoIPNView.as_view(), name='momo-ipn'),
         path('api/payments/momo/return/', views.MoMoReturnView.as_view(), name='momo-return'),
-    # VNPay URLs
+        # VNPay URLs - QUAN TRỌNG: Đúng thứ tự và định dạng
         path('api/payments/vnpay/create/', views.CreateVNPayPaymentView.as_view(), name='vnpay-create'),
         path('api/payments/vnpay/return/', views.VNPayReturnView.as_view(), name='vnpay-return'),
         path('api/payments/vnpay/ipn/', views.VNPayIPNView.as_view(), name='vnpay-ipn'),
+        # # Success/Failure pages (optional - for testing)
+        # path('payment/success/', views.PaymentSuccessView.as_view(), name='payment-success'),
+        # path('payment/failed/', views.PaymentFailedView.as_view(), name='payment-failed'),
 
 ]

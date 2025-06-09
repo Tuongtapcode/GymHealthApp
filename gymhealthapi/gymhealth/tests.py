@@ -1,34 +1,11 @@
 import hmac
 import hashlib
-from urllib.parse import urlencode
 
-# Cấu hình
-HASH_SECRET = 'V3025B1XYEAPJFBN9FSXWEXIC52YRTMM'
-
-
-def create_secure_hash(params, secret):
-    # Bước 1: Sắp xếp params theo key alphabet (ASCII)
-    sorted_params = dict(sorted(params.items()))
-
-    # Bước 2: Tạo chuỗi query string (không encode ký tự đặc biệt)
-    query_string = urlencode(sorted_params, doseq=True, safe='')
-
-    # Bước 3: Tạo HMAC SHA512
-    hash_data = hmac.new(secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha512).hexdigest()
-
-    return hash_data
-
-
-params = {
-    "vnp_Amount": "45000000",
-    "vnp_CreateDate": "20250605102545",
-    "vnp_OrderInfo": "Thanh toan goi tap Mot thang khong khuyen mai",
-    "vnp_ResponseCode": "00",
-    "vnp_TmnCode": "643RJMBQ",
-    "vnp_TransactionDate": "20250605102545",
-    "vnp_TransactionNo": "15000632",
-    "vnp_TxnRef": "2111749093877902"
-}
-
-secure_hash = create_secure_hash(params, HASH_SECRET)
-print("vnp_SecureHash =", secure_hash)
+secret_key = "V3025B1XYEAPJFBN9FSXWEXIC52YRTMM"
+query_string = "vnp_Amount=45000000&vnp_Command=pay&vnp_CreateDate=20250607105931&vnp_CurrCode=VND&vnp_ExpireDate=20250607111431&vnp_IpAddr=192.168.2.16&vnp_IpnUrl=https%3A%2F%2F02e5-171-231-61-11.ngrok-free.app%2Fapi%2Fpayments%2Fvnpay%2Fipn%2F&vnp_Locale=vn&vnp_OrderInfo=Thanh+toan+goi+tap+Mot+thang+khong+khuyen+mai&vnp_OrderType=other&vnp_ReturnUrl=https%3A%2F%2F02e5-171-231-61-11.ngrok-free.app%2Fapi%2Fpayments%2Fvnpay%2Freturn%2F&vnp_TmnCode=643RJMBQ&vnp_TxnRef=2421749268771268&vnp_Version=2.1.0"
+hash_value = hmac.new(
+    secret_key.encode('utf-8'),
+    query_string.encode('utf-8'),
+    hashlib.sha512
+).hexdigest()
+print(hash_value)
