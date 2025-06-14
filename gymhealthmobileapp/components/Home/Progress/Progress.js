@@ -481,7 +481,6 @@ const Progress = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("AddProgress")}
           >
             <Text style={styles.buttonPrimaryText}>Thêm dữ liệu</Text>
           </TouchableOpacity>
@@ -675,7 +674,6 @@ const Progress = ({ navigation }) => {
           <Text style={styles.noDataText}>Chưa có dữ liệu số đo cơ thể</Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("AddProgress")}
           >
             <Text style={styles.buttonPrimaryText}>Thêm dữ liệu</Text>
           </TouchableOpacity>
@@ -880,7 +878,6 @@ const Progress = ({ navigation }) => {
           <Text style={styles.noDataText}>Chưa có dữ liệu thể lực</Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("AddProgress")}
           >
             <Text style={styles.buttonPrimaryText}>Thêm dữ liệu</Text>
           </TouchableOpacity>
@@ -1046,7 +1043,6 @@ const Progress = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("AddProgress")}
           >
             <Text style={styles.buttonPrimaryText}>Thêm dữ liệu</Text>
           </TouchableOpacity>
@@ -1061,9 +1057,9 @@ const Progress = ({ navigation }) => {
             <TouchableOpacity
               key={record.id}
               style={styles.historyItem}
-              onPress={() =>
-                navigation.navigate("ProgressDetail", { recordId: record.id })
-              }
+              // onPress={() =>
+              //   navigation.navigate("ProgressDetail", { recordId: record.id })
+              // }
             >
               <View style={styles.historyHeader}>
                 <Text style={styles.historyDate}>
@@ -1118,7 +1114,6 @@ const Progress = ({ navigation }) => {
           <Text style={styles.headerTitle}>Tiến độ tập luyện</Text>     
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={() => navigation.navigate("AddProgress")}
           >
             <Ionicons name="add-circle" size={24} color="#1a73e8" />
           </TouchableOpacity>
@@ -1158,7 +1153,6 @@ const Progress = ({ navigation }) => {
         <Text style={styles.headerTitle}>Tiến trình tập luyện</Text>
         <TouchableOpacity
           style={styles.headerButton}
-          onPress={() => navigation.navigate("AddProgress")}
         >
           <Ionicons name="add-circle" size={24} color="#1a73e8" />
         </TouchableOpacity>

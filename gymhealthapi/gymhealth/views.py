@@ -66,27 +66,6 @@ class UserViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
         }, status=status.HTTP_201_CREATED)
 
 
-class UserRegisterView(generics.CreateAPIView):
-    serializer_class = serializers.UserSerializer
-    permission_classes = [permissions.AllowAny]  # ALL
-
-    def create(self, request, *args, **kwargs):
-        # Khởi tạo serializer với dữ liệu từ request (POST body)
-        serializer = self.get_serializer(data=request.data)
-
-        # Kiểm tra dữ liệu có hợp lệ không
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()  # Lưu vào db
-        message = "Đăng ký thành công."
-        if user.role == 'MEMBER':
-            message += " Thông tin sức khỏe của bạn đã được lưu lại."
-        return Response({
-            "user": serializer.data,
-            "message": message,
-            # "token": token.key  # Nếu bạn dùng token auth
-        }, status=status.HTTP_201_CREATED)
-
-
 class HealthInfoViewSet(viewsets.ViewSet):
     serializer_class = serializers.HealthInfoSerializer
     # Quyền đã đăng nhập và chủ sở hữu mới được sử dụng API
@@ -99,12 +78,9 @@ class HealthInfoViewSet(viewsets.ViewSet):
     filterset_fields = ['blood_type', 'gender', 'height', 'weight', 'user__is_active']
     search_fields = ['user__username', 'user__email', 'user__first_name', 'user__last_name', 'note']
     ordering_fields = ['created_date', 'updated_date', 'height', 'weight', 'user__date_joined']
-    ordering = ['-updated_date']  # Mặc định sắp xếp theo ngày cập nhật, mới nhất trước
+    ordering = ['id']  # Mặc định sắp xếp theo ngày cập nhật, mới nhất trước
 
     def get_object(self):
-        """
-        Helper để lấy thông tin sức khỏe của user hiện tại.
-        """
         try:
             return HealthInfo.objects.get(user=self.request.user)
         except HealthInfo.DoesNotExist:
@@ -112,9 +88,7 @@ class HealthInfoViewSet(viewsets.ViewSet):
 
     @action(methods=['get'], detail=False, url_path='my', url_name='my-healthinfo')
     def get_health_info(self, request):
-        """
-        API GET: Lấy thông tin sức khỏe của chính user
-        """
+        #Lấy thông tin sức khỏe của chính user (từ get_object ở trên)
         health_info = self.get_object()
         if not health_info:
             return Response({"error": "Bạn chưa có thông tin sức khỏe"}, status=status.HTTP_404_NOT_FOUND)
@@ -122,11 +96,8 @@ class HealthInfoViewSet(viewsets.ViewSet):
         serializer = self.serializer_class(health_info)
         return Response(serializer.data)
 
-    @action(methods=['put'], detail=False, url_path='update-all', url_name='put_health_info')
+    @action(methods=['put'], detail=False, url_path='update-all', url_name='update-all')
     def put_health_info(self, request):
-        """
-        API PUT: Cập nhật toàn bộ thông tin sức khỏe
-        """
         health_info = self.get_object()
         if not health_info:
             return Response({"error": "Bạn chưa có thông tin sức khỏe"}, status=status.HTTP_404_NOT_FOUND)
@@ -136,26 +107,21 @@ class HealthInfoViewSet(viewsets.ViewSet):
         serializer.save()
         return Response(serializer.data)
 
-    @action(methods=['patch'], detail=False, url_path='update', url_name='update-my-healthinfo-patch')
+    @action(methods=['patch'], detail=False, url_path='update', url_name='update')
     def patch_health_info(self, request):
-        """
-        API PATCH: Cập nhật một phần thông tin sức khỏe
-        """
+        # API PATCH: Cập nhật một phần thông tin sức khỏe (sử dụng partial=True)
         health_info = self.get_object()
         if not health_info:
             return Response({"error": "Bạn chưa có thông tin sức khỏe"}, status=status.HTTP_404_NOT_FOUND)
-
         serializer = self.serializer_class(health_info, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-
         return Response(serializer.data)
-
 
 class UserProfileView(generics.GenericAPIView):
     # Quyền đã đăng nhập, và sở hữu
     permission_classes = [permissions.IsAuthenticated, perms.IsOwner]
-    pagination_class = paginators.ItemPaginator
+    # pagination_class = paginators.ItemPaginator
 
     def get_serializer_class(self):
         user = self.request.user
@@ -169,11 +135,13 @@ class UserProfileView(generics.GenericAPIView):
     def get_object(self):
         user = self.request.user
         if user.is_trainer:
+            # kiểm tra xem đối tượng user có thuộc tính trainer_profile hay không.
             if hasattr(user, 'trainer_profile'):
                 return user.trainer_profile
             else:
                 raise NotFound("Hồ sơ huấn luyện viên chưa được tạo.")
         elif user.is_member:
+            # kiểm tra xem đối tượng user có thuộc tính member_profile hay không.
             if hasattr(user, 'member_profile'):
                 return user.member_profile
             else:
@@ -209,14 +177,7 @@ class PackageTypeViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = paginators.ItemPaginator
 
     def get_permissions(self):
-        if self.request.method in permissions.SAFE_METHODS:
-            # GET, HEAD, OPTIONS => Ai cũng được phép (AllowAny)
-            permission_classes = [permissions.AllowAny]
-        else:
-            # POST, PUT, PATCH, DELETE => Phải là user có quyền (IsAuthenticated)
-            permission_classes = [permissions.IsAuthenticated, perms.IsManager]
-        return [permission() for permission in permission_classes]
-
+        return [permissions.AllowAny()]
 
 class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Benefit.objects.filter(active=True)
@@ -229,22 +190,13 @@ class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
 
 class PackageViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Packages.objects.filter(active=True)
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes =[permissions.AllowAny]
     serializer_class = PackageSerializer
     search_fields = ['name', 'description']
     ordering_fields = ['price', 'package_type__duration_months', 'pt_sessions']
     filterset_fields = ['package_type', 'pt_sessions', 'price']
     filter_backends = [DjangoFilterBackend]
     pagination_class = paginators.ItemPaginator
-
-    def get_permissions(self):
-        if self.request.method in permissions.SAFE_METHODS:
-            # GET, HEAD, OPTIONS => Ai cũng được phép (AllowAny)
-            permission_classes = [permissions.AllowAny]
-        else:
-            # POST, PUT, PATCH, DELETE => Phải là user có quyền (IsAuthenticated)
-            permission_classes = [permissions.IsAuthenticated, perms.IsManager]
-        return [permission() for permission in permission_classes]
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -259,16 +211,15 @@ class PackageViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path="with_pt")
     def with_pt(self, request):
-        """Danh sách gói có buổi PT"""
-        # Apply filters first, then add the pt_sessions filter
+        # Danh sách gói có buổi PT
         queryset = self.filter_queryset(self.get_queryset())
-        packages = queryset.filter(pt_sessions__gt=0)
+        packages = queryset.filter(pt_sessions__gt=0) #pt_sessions > 0
         serializer = self.get_serializer(packages, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
     def benefits(self, request, pk=None):
-        """Danh sách quyền lợi của 1 gói"""
+        # Danh sách quyền lợi của 1 gói
         package = self.get_object()
         benefits = package.benefits.filter(active=True)
         serializer = BenefitSerializer(benefits, many=True)
@@ -276,7 +227,7 @@ class PackageViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class TrainerListView(generics.ListAPIView):
-    """API để lấy danh sách PT với thông tin cơ bản và lịch làm việc"""
+    #API để lấy danh sách PT với thông tin cơ bản và lịch làm việc
     serializer_class = TrainerListSerializer
     permission_classes = [permissions.IsAuthenticated]
     search_fields = ['username', 'first_name', 'last_name', 'trainer_profile__specialization']
@@ -284,7 +235,7 @@ class TrainerListView(generics.ListAPIView):
     pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
-        # Lấy tất cả user có role là TRAINER
+        # Lấy tất cả user là TRAINER
         queryset = User.objects.filter(role='TRAINER', is_active=True)
 
         # Lọc PT theo chuyên môn nếu có
@@ -310,7 +261,7 @@ class TrainerListView(generics.ListAPIView):
                 available_date = date.fromisoformat(available_date)
 
                 # Lấy danh sách ID của các PT đã có lịch cả ngày (không còn slot trống)
-                # Giả sử mỗi ngày PT có thể làm từ 8:00 đến 20:00
+
                 fully_booked_trainers = WorkoutSession.objects.filter(
                     trainer__isnull=False,
                     session_date=available_date,
@@ -327,7 +278,7 @@ class TrainerListView(generics.ListAPIView):
 
 
 class TrainerDetailView(generics.RetrieveAPIView):
-    """API để lấy thông tin chi tiết của một PT cụ thể"""
+    #API để lấy thông tin chi tiết của một PT cụ thể
     serializer_class = serializers.TrainerDetailSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = paginators.ItemPaginator
@@ -343,7 +294,7 @@ class TrainerDetailView(generics.RetrieveAPIView):
 
 
 class TrainerUpcomingSessionsView(generics.ListAPIView):
-    """API để lấy danh sách các buổi tập sắp tới của một PT cụ thể"""
+    #API để lấy danh sách các buổi tập sắp tới của một PT cụ thể
     serializer_class = serializers.WorkoutSessionScheduleSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = paginators.ItemPaginator
@@ -411,172 +362,6 @@ class TrainerUpcomingSessionsView(generics.ListAPIView):
         })
 
 
-#
-# class WorkoutSessionCreateView(generics.CreateAPIView):
-#     """API để tạo buổi tập mới"""
-#     serializer_class = serializers.WorkoutSessionCreateSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-#
-#     def perform_create(self, serializer):
-#         """Kiểm tra quyền và thực hiện tạo buổi tập"""
-#         # Kiểm tra người dùng phải là hội viên
-#         if not self.request.user.is_member:
-#             raise PermissionDenied("Chỉ hội viên mới có thể đặt lịch tập.")
-#
-#         # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
-#         try:
-#             member_profile = self.request.user.member_profile
-#             if not member_profile.is_membership_valid:
-#                 raise PermissionDenied("Tư cách hội viên của bạn đã hết hạn hoặc không hợp lệ.")
-#         except MemberProfile.DoesNotExist:
-#             raise PermissionDenied("Bạn chưa có hồ sơ hội viên.")
-#
-#         serializer.save()
-#
-#
-# class TrainerWorkoutSessionListView(generics.ListAPIView):
-#     """API để PT xem danh sách lịch tập được yêu cầu"""
-#     serializer_class = serializers.WorkoutSessionListScheduleSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-#
-#     def get_queryset(self):
-#         """Lọc danh sách buổi tập theo PT hiện tại"""
-#         if not self.request.user.is_trainer:
-#             raise PermissionDenied("Chỉ huấn luyện viên mới có thể xem danh sách này.")
-#
-#         # Mặc định hiển thị các buổi tập đang chờ duyệt
-#         status_filter = self.request.query_params.get('status', 'pending')
-#
-#         queryset = WorkoutSession.objects.filter(
-#             trainer=self.request.user,
-#             session_type='pt_session'
-#         )
-#
-#         # Lọc theo trạng thái nếu có
-#         if status_filter != 'all':
-#             queryset = queryset.filter(status=status_filter)
-#
-#         return queryset.order_by('session_date', 'start_time')
-#
-#
-# class TrainerWorkoutSessionUpdateView(generics.UpdateAPIView):
-#     """API để PT cập nhật trạng thái buổi tập"""
-#     serializer_class = serializers.WorkoutSessionUpdateSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-#     queryset = WorkoutSession.objects.all()
-#
-#     def get_object(self):
-#         obj = super().get_object()
-#         if not self.request.user.is_trainer:
-#             raise PermissionDenied("Chỉ huấn luyện viên mới có thể cập nhật lịch tập.")
-#
-#         if obj.trainer != self.request.user:
-#             raise PermissionDenied("Bạn không có quyền cập nhật buổi tập này.")
-#
-#         if obj.session_type != 'pt_session':
-#             raise PermissionDenied("Bạn chỉ có thể cập nhật buổi tập PT.")
-#
-#         return obj
-#
-#     def perform_update(self, serializer):
-#         # Tự động gửi thông báo khi PT cập nhật trạng thái
-#         session = self.get_object()
-#         new_status = serializer.validated_data.get('status')
-#         notes = serializer.validated_data.get('trainer_notes', '')
-#
-#         serializer.save()
-#
-#         # Tạo thông báo cho hội viên
-#         if new_status == 'confirmed':
-#             message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã được PT xác nhận."
-#         elif new_status == 'cancelled':
-#             message = f"Buổi tập của bạn vào ngày {session.session_date} lúc {session.start_time} đã bị hủy."
-#         elif new_status == 'rescheduled':
-#             message = f"PT đề xuất đổi lịch cho buổi tập vào ngày {session.session_date}."
-#
-#         if notes:
-#             message += f" Ghi chú: {notes}"
-#
-#         # Tạo thông báo cho hội viên
-#         Notification.objects.create(
-#             user=session.member,
-#             title=f"Cập nhật lịch tập - {dict(WorkoutSession.SESSION_STATUS)[new_status]}",
-#             message=message,
-#             notification_type='session_reminder',
-#             related_object_id=session.id
-#         )
-#
-#
-# class RescheduleSessionView(generics.GenericAPIView):
-#     """API để PT đề xuất thời gian mới cho buổi tập"""
-#     serializer_class = serializers.RescheduleSessionSerializer
-#     permission_classes = [permissions.IsAuthenticated]
-#
-#     def get_session(self, session_id):
-#         """Lấy buổi tập từ ID và kiểm tra quyền"""
-#         try:
-#             return WorkoutSession.objects.get(id=session_id, trainer=self.request.user)
-#         except WorkoutSession.DoesNotExist:
-#             return Response(
-#                 {"detail": "Buổi tập không tồn tại hoặc bạn không phải PT của buổi tập này."},
-#                 status=status.HTTP_404_NOT_FOUND
-#             )
-#
-#     def post(self, request, session_id, *args, **kwargs):
-#         if not request.user.is_trainer:
-#             return Response({"detail": "Chỉ huấn luyện viên mới có thể đề xuất lịch tập mới."},
-#                             status=status.HTTP_403_FORBIDDEN)
-#
-#         # Lấy buổi tập từ ID trong URL
-#         session = self.get_session(session_id)
-#
-#         # Truyền session vào context để serializer có thể sử dụng
-#         serializer = self.get_serializer(
-#             data=request.data,
-#             context={'request': request, 'session': session}
-#         )
-#         serializer.is_valid(raise_exception=True)
-#
-#         # Tạo bản ghi lịch sử về việc đổi lịch
-#         old_date = session.session_date
-#         old_start = session.start_time
-#
-#         # Cập nhật trạng thái và tạo ghi chú
-#         reason = serializer.validated_data.get('reason', '')
-#         note = f"Đề xuất đổi lịch từ {old_date} {old_start} sang {serializer.validated_data['new_date']} {serializer.validated_data['new_start_time']}. "
-#         if reason:
-#             note += f"Lý do: {reason}"
-#
-#         # Cập nhật session
-#         session.session_date = serializer.validated_data['new_date']
-#         session.start_time = serializer.validated_data['new_start_time']
-#         session.end_time = serializer.validated_data['new_end_time']
-#         session.status = 'rescheduled'
-#         session.trainer_notes = note
-#         session.save()
-#
-#         # Tạo thông báo cho hội viên
-#         Notification.objects.create(
-#             user=session.member,
-#             title="Đề xuất thay đổi lịch tập",
-#             message=f"PT {request.user.get_full_name()} đã đề xuất đổi lịch tập của bạn sang ngày {serializer.validated_data['new_date']} lúc {serializer.validated_data['new_start_time']}. {reason}",
-#             notification_type='session_reminder',
-#             related_object_id=session.id
-#         )
-#
-#         return Response({
-#             "detail": "Đã đề xuất lịch tập mới thành công.",
-#             "session": {
-#                 "id": session.id,
-#                 "member": session.member.get_full_name(),
-#                 "new_date": session.session_date,
-#                 "new_start_time": session.start_time,
-#                 "new_end_time": session.end_time,
-#                 "status": session.status
-#             }
-#         }, status=status.HTTP_200_OK)
-#
-
 class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     serializer_class = serializers.SubscriptionPackageSerializer
     search_fields = ['member__username', 'package__name', 'status']
@@ -606,7 +391,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'], url_path='register',
             permission_classes=[permissions.IsAuthenticated, perms.IsMember])
     def register_package(self, request):
-        """API cho người dùng đăng ký gói tập"""
+        # API cho người dùng đăng ký gói tập
 
         # Thêm thông tin member vào data
         data = request.data.copy()
@@ -674,9 +459,8 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
         )
 
     @action(detail=True, methods=['post'], url_path='verify-payment',
-            permission_classes=[permissions.IsAuthenticated, perms.IsManager])
+            permission_classes=[permissions.IsAuthenticated, perms.IsMember])#perms.IsManager
     def verify_payment(self, request, pk=None):
-        """Xác nhận thanh toán từ Manager"""
         subscription = self.get_object()
 
         if subscription.status != 'pending':
@@ -731,7 +515,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
         status_filter = request.query_params.get('status')
         if status_filter:
             subscriptions = subscriptions.filter(status=status_filter)
-
+        # phân trang
         page = self.paginate_queryset(subscriptions)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -743,7 +527,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['get'], url_path='active', url_name='active-subscription',
             permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def active_subscription(self, request):
-        """Lấy gói đăng ký đang hoạt động của người dùng hiện tại"""
+        # Lấy gói đăng ký đang hoạt động của người dùng hiện tại
         if not request.user.is_member:
             return Response({"error": "Chỉ hội viên mới có thể xem gói đăng ký"},
                             status=status.HTTP_403_FORBIDDEN)
@@ -766,7 +550,7 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'], url_path='cancel',
             permission_classes=[permissions.IsAuthenticated, perms.IsSubscriptionOwnerOrManager])
     def cancel_subscription(self, request, pk=None):
-        """Hủy gói đăng ký"""
+        # Hủy gói đăng kí
         if not request.user.is_authenticated:
             return Response({"error": "Bạn chưa đăng nhập."}, status=status.HTTP_401_UNAUTHORIZED)
         subscription = self.get_object()
@@ -787,19 +571,19 @@ class SubscriptionPackageViewSet(viewsets.GenericViewSet):
             notification_type="system",
             related_object_id=subscription.id
         )
-
         return Response({"message": "Đã hủy gói đăng ký thành công"})
 
 
 
+
 class WorkoutSessionViewSet(viewsets.ViewSet):
-    """ViewSet để quản lý các buổi tập"""
+    #ViewSet để quản lý các buổi tập
     queryset = WorkoutSession.objects.all()
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = paginators.ItemPaginator
 
     def get_serializer_class(self):
-        """Trả về serializer tương ứng dựa trên action"""
+        #Trả về serializer tương ứng dựa trên action
         if self.action == 'register':
             return serializers.WorkoutSessionCreateSerializer
         elif self.action == 'trainer_sessions':
@@ -818,7 +602,6 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='member/register', url_name='member-register',
             permission_classes=[permissions.IsAuthenticated, perms.IsMember])
     def register(self, request):
-        """API để hội viên đăng ký buổi tập"""
         # Kiểm tra người dùng phải có hồ sơ hội viên hợp lệ
         try:
             member_profile = request.user.member_profile
@@ -829,11 +612,12 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
 
         # Lấy gói tập đang hoạt động (sử dụng logic tương tự active_subscription)
         active_subscription = SubscriptionPackage.objects.filter(
-            member=request.user,
-            status='active',
-            start_date__lte=date.today(),
-            end_date__gte=date.today()
-        ).order_by('-remaining_pt_sessions', '-created_at').first()
+            member=request.user,  # Thuộc về user hiện tại
+            status='active',  # Trạng thái đang hoạt động
+            start_date__lte=date.today(),  # Đã bắt đầu (ngày bắt đầu <= hôm nay)
+            end_date__gte=date.today(),  # Chưa hết hạn (ngày kết thúc >= hôm nay)
+            remaining_pt_sessions__gt=0  # Còn buổi PT (> 0)
+        ).order_by('end_date').first()  # Sắp xếp theo ngày kết thúc, lấy gói sắp hết hạn nhất
 
         if not active_subscription:
             return Response(
@@ -861,17 +645,21 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
         # Xác thực dữ liệu
         serializer.is_valid(raise_exception=True)
 
-        # Lưu dữ liệu với member và subscription
+        # Xác định status dựa trên loại buổi tập
+        initial_status = 'confirmed' if session_type == 'self_training' else 'pending'
+
+        # Lưu dữ liệu với member, subscription và status phù hợp
         workout_session = serializer.save(
             member=request.user,
-            subscription=active_subscription
+            subscription=active_subscription,
+            status=initial_status
         )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     @action(detail=False, methods=['get'], url_path='trainer/pending-session', url_name='trainer_sessions',
             permission_classes=[permissions.IsAuthenticated, perms.IsTrainer])
     def trainer_sessions(self, request):
-        """API để PT xem danh sách lịch tập được yêu cầu"""
+        #API để PT xem danh sách lịch tập được yêu cầu
 
         # Mặc định hiển thị các buổi tập đang chờ duyệt
         status_filter = request.query_params.get('status', 'pending')
@@ -942,34 +730,70 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
 
         if session.session_type != 'pt_session':
             raise PermissionDenied("Bạn chỉ có thể cập nhật buổi tập PT.")
-            # Kiểm tra request có chứa status hay không
+
+        # Kiểm tra request có chứa status hay không
         if 'status' not in request.data:
             return Response(
                 {
                     "status": "Trạng thái là trường bắt buộc. Vui lòng chọn một trạng thái (confirmed, cancelled, hoặc rescheduled)."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-            # Giới hạn quyền cập nhật trạng thái dựa trên vai trò
-            new_status = request.data.get('status')
 
-            if request.user.is_trainer:
-                # PT có thể cập nhật tất cả các trạng thái
-                valid_statuses = ['confirmed', 'cancelled', 'rescheduled', 'completed']
+        # Lấy trạng thái mới từ request - DI CHUYỂN LÊN ĐÂY
+        new_status = request.data.get('status')
+
+        # Giới hạn quyền cập nhật trạng thái dựa trên vai trò
+        if request.user.is_trainer:
+            # PT có thể cập nhật tất cả các trạng thái
+            valid_statuses = ['confirmed', 'cancelled', 'rescheduled', 'completed']
+        else:
+            # Hội viên chỉ có thể xác nhận hoặc hủy
+            valid_statuses = ['confirmed', 'cancelled']
+
+        if new_status not in valid_statuses:
+            return Response(
+                {
+                    "status": f"Bạn không có quyền cập nhật trạng thái này. Các trạng thái hợp lệ: {', '.join(valid_statuses)}"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Kiểm tra số buổi PT còn lại nếu muốn confirm (áp dụng cho cả PT và member)
+        if new_status == 'confirmed':
+            # Lấy subscription của buổi tập này
+            subscription = session.subscription
+            if subscription:
+                # Kiểm tra nếu remaining_pt_sessions = 0 thì không cho phép confirm
+                if subscription.remaining_pt_sessions == 0:
+                    return Response(
+                        {
+                            "error": "Không thể xác nhận buổi tập này. "
+                                     f"Hội viên đã hết số buổi PT trong gói hiện tại. "
+                                     f"Số buổi PT còn lại: {subscription.remaining_pt_sessions}. "
+                                     "Vui lòng yêu cầu hội viên gia hạn gói tập hoặc mua thêm buổi PT."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # Kiểm tra nếu remaining_pt_sessions < 0 (trường hợp bất thường)
+                elif subscription.remaining_pt_sessions < 0:
+                    return Response(
+                        {
+                            "error": "Số buổi PT trong gói đã âm. Vui lòng liên hệ quản trị viên để kiểm tra."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             else:
-                # Hội viên chỉ có thể xác nhận hoặc hủy
-                valid_statuses = ['confirmed', 'cancelled']
-
-            if new_status not in valid_statuses:
+                # Trường hợp không có subscription
                 return Response(
                     {
-                        "status": f"Bạn không có quyền cập nhật trạng thái này. Các trạng thái hợp lệ: {', '.join(valid_statuses)}"},
-                    status=status.HTTP_403_FORBIDDEN
+                        "error": "Không tìm thấy gói tập của hội viên. Vui lòng kiểm tra lại."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Xử lý cập nhật trạng thái
+        # Xử lý cập nhật trạng thái
         serializer = serializers.WorkoutSessionUpdateSerializer(session, data=request.data, partial=True)
         if serializer.is_valid():
-            # Lấy dữ liệu từ serializer
+            # Lấy dữ liệu từ serializer (new_status đã được khai báo ở trên)
             new_status = serializer.validated_data.get('status')
 
             # Xử lý notes tùy theo vai trò người dùng
@@ -1001,6 +825,7 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
             elif new_status == 'completed':
                 title = f"Buổi tập hoàn thành"
                 message = f"{user_type} đã hoàn thành buổi tập vào ngày {session.session_date} lúc {session.start_time}."
+
             if notes:
                 message += f" Ghi chú: {notes}"
 
@@ -1084,45 +909,6 @@ class WorkoutSessionViewSet(viewsets.ViewSet):
                 "new_end_time": session.end_time,
                 "status": session.status
             }
-        }, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'], url_path='weekly-schedule', url_name='weekly_schedule')
-    def weekly_schedule(self, request):
-        """API để xem lịch tập từ thứ 2 đến thứ 7 của tuần hiện tại"""
-
-        # Lấy thời gian hiện tại
-        today = datetime.now().date()
-
-        # Tính thứ mấy trong tuần (isoweekday: Monday=1, Sunday=7)
-        weekday = today.isoweekday()
-
-        # Tìm ngày thứ 2 (đầu tuần)
-        monday = today - timedelta(days=weekday - 1)
-
-        # Tìm ngày thứ 7 (cuối tuần)
-        saturday = monday + timedelta(days=5)
-
-        # Query lịch tập trong khoảng từ thứ 2 đến thứ 7
-        queryset = WorkoutSession.objects.filter(
-            session_date__gte=monday,
-            session_date__lte=saturday
-        )
-
-        # Nếu bạn muốn filter theo PT (user đăng nhập)
-        if request.user.is_trainer:
-            queryset = queryset.filter(trainer=request.user)
-        else:
-            # Nếu là hội viên, thì filter theo member
-            queryset = queryset.filter(member=request.user)
-
-        queryset = queryset.order_by('session_date', 'start_time')
-
-        serializer = self.get_serializer(queryset, many=True)
-
-        return Response({
-            "start_date": monday,
-            "end_date": saturday,
-            "sessions": serializer.data
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='weekly-schedule', url_name='weekly_schedule')
@@ -1810,98 +1596,14 @@ class TrainingProgressViewSet(viewsets.ViewSet):
                 {"error": "Không tìm thấy phiên tập"},
                 status=status.HTTP_404_NOT_FOUND
             )
-    #
-    # @action(detail=False, methods=['post'], url_path='record-progress')
-    # def record_progress(self, request):
-    #     """API để tạo mới hoặc cập nhật bản ghi tiến độ"""
-    #     serializer = self.get_serializer(data=request.data)
-    #     serializer.is_valid(raise_exception=True)
-    #
-    #     health_info = serializer.validated_data.get('health_info')
-    #     workout_session = serializer.validated_data.get('workout_session')
-    #
-    #     # Tìm bản ghi hiện có
-    #     try:
-    #         existing = TrainingProgress.objects.get(
-    #             health_info=health_info,
-    #             workout_session=workout_session
-    #         )
-    #         # Kiểm tra người dùng hiện tại có phải người tạo không
-    #         if existing.created_by != request.user:
-    #             return Response(
-    #                 {"error": "Bạn không có quyền chỉnh sửa bản ghi này vì bạn không phải người tạo"},
-    #                 status=status.HTTP_403_FORBIDDEN
-    #             )
-    #
-    #         # Cập nhật bản ghi hiện có
-    #         update_serializer = self.get_serializer(existing, data=request.data, partial=True)
-    #         update_serializer.is_valid(raise_exception=True)
-    #         instance = update_serializer.save()
-    #         return Response(self.get_serializer(instance).data)
-    #     except TrainingProgress.DoesNotExist:
-    #         # Tạo mới nếu chưa tồn tại
-    #         instance = serializer.save(created_by=request.user)
-    #         return Response(
-    #             self.get_serializer(instance).data,
-    #             status=status.HTTP_201_CREATED
-    #         )
-    #
-    # @action(detail=False, methods=['post'], url_path='record-progress')
-    # def record_progress(self, request):
-    #     """API để tạo mới hoặc cập nhật bản ghi tiến độ"""
-    #     serializer = self.get_serializer(data=request.data)
-    #     serializer.is_valid(raise_exception=True)
-    #
-    #     health_info = serializer.validated_data.get('health_info')
-    #     workout_session = serializer.validated_data.get('workout_session')
-    #
-    #     # Tìm bản ghi hiện có
-    #     try:
-    #         existing = TrainingProgress.objects.get(
-    #             health_info=health_info,
-    #             workout_session=workout_session
-    #         )
-    #         # Kiểm tra người dùng hiện tại có phải người tạo không
-    #         if existing.created_by != request.user:
-    #             return Response(
-    #                 {"error": "Bạn không có quyền chỉnh sửa bản ghi này vì bạn không phải người tạo"},
-    #                 status=status.HTTP_403_FORBIDDEN
-    #             )
-    #
-    #         # Cập nhật bản ghi hiện có
-    #         update_serializer = self.get_serializer(existing, data=request.data, partial=True)
-    #         update_serializer.is_valid(raise_exception=True)
-    #         instance = update_serializer.save()
-    #         return Response(self.get_serializer(instance).data)
-    #     except TrainingProgress.DoesNotExist:
-    #         # Tạo mới nếu chưa tồn tại
-    #         instance = serializer.save(created_by=request.user)
-    #         return Response(
-    #             self.get_serializer(instance).data,
-    #             status=status.HTTP_201_CREATED
-    #         )
-
-
 ### API ratiing:
 class TrainerRatingViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint cho đánh giá huấn luyện viên
-    - List/Create: GET/POST /api/trainer-ratings/
-    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/trainer-ratings/{id}/
-    - Custom actions:
-      + my_ratings: GET /api/trainer-ratings/my-ratings/
-    """
     serializer_class = serializers.TrainerRatingSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, perms.IsOwnerOrReadOnly]
     pagination_class = paginators.ItemPaginator
 
-    @action(detail=False, methods=['get'], url_path='trainer/my_rating')
+    @action(detail=False, methods=['get'], url_path='trainer/my_rating  ')
     def trainer_my_rating(self, request):
-        """
-        Lấy tất cả đánh giá mà trainer hiện tại đã nhận từ các hội viên
-        GET /api/trainer-ratings/trainer/my_rating/
-        Chỉ trainer mới có thể truy cập endpoint này
-        """
         # Kiểm tra user hiện tại có phải là trainer không
         if request.user.role != 'TRAINER':
             return Response(
@@ -1949,19 +1651,11 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
         })
     @action(detail=False, methods=['get'], url_path='my-ratings')
     def my_ratings(self, request):
-        """
-        Lấy tất cả đánh giá trainer mà user hiện tại đã tạo
-        GET /api/trainer-ratings/my-ratings/
-        """
         ratings = TrainerRating.objects.filter(user=request.user)
         serializer = self.get_serializer(ratings, many=True)
         return Response(serializer.data)
 
     def get_queryset(self):
-        """
-        Có thể filter theo trainer_id qua query params
-        GET /api/trainer-ratings/?trainer_id=123
-        """
         queryset = TrainerRating.objects.all()
         trainer_id = self.request.query_params.get('trainer_id')
         if trainer_id:
@@ -1969,8 +1663,6 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        """Tạo phản hồi cho đánh giá với rating_id từ body request"""
-
         # Lấy rating_id từ body request (có thể là trainer_rating hoặc rating_id)
         rating_id = request.data.get('trainer_rating') or request.data.get('rating_id')
 
@@ -2030,8 +1722,6 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK
             )
         else:
-            # Tạo phản hồi mới
-            # Tạo một bản sao của request.data để không modify original
             response_data = request.data.copy()
             response_data['trainer_rating'] = rating_id
 
@@ -2057,51 +1747,9 @@ class TrainerRatingViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Gán user hiện tại khi tạo rating"""
         serializer.save(user=self.request.user)
-    @action(detail=False, methods=['get'], url_path='average')
-    def average_rating(self, request, trainer_id=None):
-        """
-        Lấy điểm trung bình của huấn luyện viên
-        GET /api/trainers/{trainer_id}/ratings/average/
-        """
-        trainer = User.objects.filter(id=trainer_id, role='TRAINER').first()
-        if trainer is None:
-            return Response({"detail": "Không tìm thấy huấn luyện viên."}, status=status.HTTP_404_NOT_FOUND)
-        ratings = TrainerRating.objects.filter(trainer=trainer)
-
-        if not ratings.exists():
-            return Response(
-                {"average": 0, "count": 0},
-                status=status.HTTP_200_OK
-            )
-
-        # Tính toán điểm trung bình
-        avg_knowledge = sum(r.knowledge_score for r in ratings) / ratings.count()
-        avg_communication = sum(r.communication_score for r in ratings) / ratings.count()
-        avg_punctuality = sum(r.punctuality_score for r in ratings) / ratings.count()
-        avg_overall = sum(r.overall_score for r in ratings) / ratings.count()
-
-        data = {
-            "trainer_id": trainer_id,
-            "trainer_name": trainer.get_full_name(),
-            "average_knowledge": round(avg_knowledge, 1),
-            "average_communication": round(avg_communication, 1),
-            "average_punctuality": round(avg_punctuality, 1),
-            "average_overall": round(avg_overall, 1),
-            "total_ratings": ratings.count()
-        }
-
-        return Response(data, status=status.HTTP_200_OK)
-
 class FeedbackResponseViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint cho phản hồi đánh giá
-    - List/Create: GET/POST /api/ratings/{rating_id}/responses/
-    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/responses/{id}/
-    - Custom actions:
-      + responses: GET /api/ratings/{rating_id}/responses/ (đã tích hợp sẵn)
-    """
     serializer_class = serializers.FeedbackResponseSerializer
-    permission_classes = [permissions.IsAuthenticated, perms.IsResponseOwnerOrAdmin]
+    permission_classes = [permissions.IsAuthenticated, perms.IsOwnerOrReadOnly]
     pagination_class = paginators.ItemPaginator
 
     def get_queryset(self):
@@ -2236,10 +1884,6 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='stats')
     def response_stats(self, request, rating_id=None):
-        """
-        Lấy thống kê phản hồi cho đánh giá
-        GET /api/ratings/{rating_id}/responses/stats/
-        """
         responses = self.get_queryset()
 
         if not responses.exists():
@@ -2260,36 +1904,19 @@ class FeedbackResponseViewSet(viewsets.ModelViewSet):
 
 
 class GymRatingViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint cho đánh giá phòng gym
-    - List: GET /api/gym-ratings/
-    - Create: POST /api/gym-ratings/ (gym_id trong body)
-    - Retrieve/Update/Destroy: GET/PUT/DELETE /api/gym-ratings/{id}/
-    - Custom actions:
-      + my-ratings: GET /api/gym-ratings/my-ratings/
-      + gym-average: GET /api/gym-ratings/gym-average/?gym_id={gym_id}
-    """
     serializer_class = serializers.GymRatingSerializer
-    permission_classes = [permissions.IsAuthenticated, perms.IsRatingOwnerOrAdmin]
+    permission_classes = [permissions.IsAuthenticated, perms.IsOwnerOrReadOnly]
     pagination_class = paginators.ItemPaginator
 
 
 
     @action(detail=False, methods=['get'], url_path='my-ratings')
     def my_ratings(self, request):
-        """
-        Lấy tất cả đánh giá gym mà user hiện tại đã tạo
-        GET /api/gym-ratings/my-ratings/
-        """
         ratings = GymRating.objects.filter(user=request.user)
         serializer = self.get_serializer(ratings, many=True)
         return Response(serializer.data)
 
     def get_queryset(self):
-        """
-        Cho phép filter theo gym_id nếu có trong query params
-        Ví dụ: GET /api/gym-ratings/?gym_id=1
-        """
         queryset = GymRating.objects.all()
         gym_id = self.request.query_params.get('gym_id')
         if gym_id:
@@ -2297,9 +1924,6 @@ class GymRatingViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        """
-        Tạo đánh giá mới với gym_id từ body
-        """
         gym_id = request.data.get('gym_id')
         if not gym_id:
             return Response(
@@ -2337,57 +1961,6 @@ class GymRatingViewSet(viewsets.ModelViewSet):
             headers=headers
         )
 
-    @action(detail=False, methods=['get'], url_path='gym-average')
-    def gym_average(self, request):
-        """
-        Lấy điểm trung bình của phòng gym
-        GET /api/gym-ratings/gym-average/?gym_id={gym_id}
-        """
-        gym_id = request.query_params.get('gym_id')
-        if not gym_id:
-            return Response(
-                {"error": "Thiếu gym_id trong query params"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            gym = Gym.objects.get(id=gym_id)
-        except Gym.DoesNotExist:
-            return Response(
-                {"error": "Không tìm thấy phòng gym với ID đã cung cấp"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        ratings = GymRating.objects.filter(gym=gym)
-
-        if not ratings.exists():
-            return Response(
-                {
-                    "gym_id": int(gym_id),
-                    "gym_name": gym.name,
-                    "average_facility": 0,
-                    "average_service": 0,
-                    "average_overall": 0,
-                    "total_ratings": 0
-                },
-                status=status.HTTP_200_OK
-            )
-
-        # Tính điểm trung bình
-        avg_facility = sum(r.facility_score for r in ratings) / ratings.count()
-        avg_service = sum(r.service_score for r in ratings) / ratings.count()
-        avg_overall = sum(r.score for r in ratings) / ratings.count()  # Sửa từ overall_score thành score
-
-        data = {
-            "gym_id": int(gym_id),
-            "gym_name": gym.name,
-            "average_facility": round(avg_facility, 1),
-            "average_service": round(avg_service, 1),
-            "average_overall": round(avg_overall, 1),
-            "total_ratings": ratings.count()
-        }
-
-        return Response(data, status=status.HTTP_200_OK)
 
 
 import logging
@@ -2410,7 +1983,9 @@ from rest_framework.permissions import IsAuthenticated
 
 logger = logging.getLogger(__name__)
 
-
+#
+#
+#
 class MoMoPaymentService:
     """Service class để xử lý thanh toán MoMo"""
 
@@ -2633,7 +2208,9 @@ class MoMoReturnView(APIView):
                 "status": "error",
                 "message": "Không tìm thấy thông tin thanh toán"
             })
-
+#
+#
+#
 class PaymentViewSet(viewsets.ViewSet):
     """ViewSet để quản lý thanh toán"""
     permission_classes = [IsAuthenticated]
@@ -2711,9 +2288,6 @@ class PaymentViewSet(viewsets.ViewSet):
         })
     @action(detail=False, methods=['post'], url_path='vnpay/create')
     def create_vnpay_payment(self, request):
-        """
-        Tạo thanh toán VNPay thông qua ViewSet
-        """
         view = CreateVNPayPaymentView()
         return view.post(request)
 
@@ -2749,10 +2323,11 @@ class PaymentViewSet(viewsets.ViewSet):
                 {'error': 'Failed to check payment status'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
+#
+#
+#
     @action(detail=False, methods=['post'])
     def create_momo_payment(self, request):
-        """Tạo thanh toán MoMo - Fixed encoding"""
         serializer = serializers.CreateMoMoPaymentSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -2833,53 +2408,16 @@ class PaymentViewSet(viewsets.ViewSet):
             )
 
 
-class PaymentReceiptViewSet(viewsets.ViewSet):
-    """ViewSet để quản lý biên lai thanh toán"""
-    permission_classes = [IsAuthenticated]
-
-    def list(self, request):
-        """Lấy danh sách biên lai của user"""
-        receipts = PaymentReceipt.objects.filter(
-            payment__subscription__member=request.user
-        ).select_related('payment', 'verified_by')
-
-        serializer = serializers.PaymentReceiptSerializer(receipts, many=True)
-        return Response(serializer.data)
-
-    def create(self, request):
-        """Upload biên lai thanh toán"""
-        serializer = serializers.PaymentReceiptSerializer(data=request.data)
-
-        if serializer.is_valid():
-            # Kiểm tra payment có thuộc về user không
-            payment_id = serializer.validated_data['payment'].id
-            try:
-                payment = Payment.objects.get(
-                    id=payment_id,
-                    subscription__member=request.user
-                )
-
-                receipt = serializer.save()
-                return Response(
-                    serializer.PaymentReceiptSerializer(receipt).data,
-                    status=status.HTTP_201_CREATED
-                )
-            except Payment.DoesNotExist:
-                return Response(
-                    {"error": "Thanh toán không tồn tại hoặc không thuộc về bạn"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
+#
+#
+#
 
 from django.db import transaction
 from decimal import Decimal
 
 class CreateVNPayPaymentView(APIView):
     """
-    API tạo thanh toán VNPay - Fixed version
+    API tạo thanh toán VNPay
     """
     permission_classes = [IsAuthenticated]
 
@@ -2979,7 +2517,7 @@ class CreateVNPayPaymentView(APIView):
                     logger.warning(f"Invalid bank code: {bank_code}")
                     bank_code = None
 
-            # ✅ SỬA: Tạo order_id không có ký tự đặc biệt (VNPay loại bỏ dấu gạch dưới)
+            # Tạo order_id không có ký tự đặc biệt (VNPay loại bỏ dấu gạch dưới)
             unique_suffix = str(int(datetime.now().timestamp() * 1000))  # millisecond timestamp
             temp_order_id = f"{subscription.id}{unique_suffix}"  # Bỏ dấu gạch dưới
 
@@ -3063,10 +2601,10 @@ class VNPayIPNView(APIView):
     def get(self, request):
         """Handle GET request from VNPay IPN"""
         return self.handle_ipn_request(request, request.GET)
-
-    def post(self, request):
-        """Handle POST request from VNPay IPN"""
-        return self.handle_ipn_request(request, request.POST)
+    #
+    # def post(self, request):
+    #     """Handle POST request from VNPay IPN"""
+    #     return self.handle_ipn_request(request, request.POST)
 
     def handle_ipn_request(self, request, data_source):
         logger.info("=== VNPay IPN View Called ===")
@@ -3120,7 +2658,7 @@ class VNPayIPNView(APIView):
                 logger.error(f"IPN Payment with transaction_id {order_id} not found")
                 return HttpResponse("01", content_type="text/plain")
 
-            # ✅ SỬA: VNPay trả về số tiền gốc, không cần chia cho 100
+            # VNPay trả về số tiền gốc, không cần chia cho 100
             vnpay_amount = float(amount)  # VNPay trả về số tiền gốc
             payment_amount = float(payment.amount)
 
@@ -3232,7 +2770,7 @@ class VNPayReturnView(APIView):
                 logger.error(f"Payment with transaction_id {order_id} not found")
                 return HttpResponseRedirect("/payment/failed?error=payment_not_found")
 
-            # ✅ SỬA: VNPay trả về số tiền gốc, không cần chia cho 100
+            #VNPay trả về số tiền gốc, không cần chia cho 100
             vnpay_amount = float(amount)  # VNPay trả về số tiền gốc
             payment_amount = float(payment.amount)
 
@@ -3246,7 +2784,7 @@ class VNPayReturnView(APIView):
                 logger.error(f"Amount mismatch: expected {payment_amount}, got {vnpay_amount}")
                 return HttpResponseRedirect("/payment/failed?error=amount_mismatch")
 
-            # ✅ SỬA: Chỉ xử lý nếu chưa được xử lý (tránh xung đột với IPN)
+            #Chỉ xử lý nếu chưa được xử lý (tránh xung đột với IPN)
             if response_code == '00' and payment.status == 'pending':
                 logger.info("Return: Processing successful payment...")
 
@@ -3302,191 +2840,7 @@ class VNPayReturnView(APIView):
         except Exception as e:
             logger.error(f"Error in VNPay return: {str(e)}", exc_info=True)
             return HttpResponseRedirect("/payment/failed?error=system_error")
-# class CreateVNPayPaymentView(APIView):
-#     """
-#     API tạo thanh toán VNPay - Modified for testing
-#     """
-#     permission_classes = [IsAuthenticated]
-#
-#     def post(self, request):
-#         try:
-#             serializer = serializers.CreateVNPayPaymentSerializer(data=request.data)
-#             if not serializer.is_valid():
-#                 logger.error(f"Invalid VNPay data: {serializer.errors}")
-#                 return Response(
-#                     {'error': 'Dữ liệu không hợp lệ', 'details': serializer.errors},
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
-#
-#             # Lấy và validate dữ liệu
-#             subscription_id = serializer.validated_data['subscription_id']
-#             amount = serializer.validated_data['amount']
-#             order_info = serializer.validated_data['order_info']
-#             bank_code = serializer.validated_data.get('bank_code')
-#
-#             # Validate amount
-#             try:
-#                 amount_decimal = Decimal(str(amount))
-#                 if amount_decimal < Decimal('1000'):
-#                     return Response(
-#                         {'error': 'Số tiền tối thiểu là 1,000 VND'},
-#                         status=status.HTTP_400_BAD_REQUEST
-#                     )
-#                 if amount_decimal > Decimal('100000000'):
-#                     return Response(
-#                         {'error': 'Số tiền không được vượt quá 100,000,000 VND'},
-#                         status=status.HTTP_400_BAD_REQUEST
-#                     )
-#             except (ValueError, TypeError):
-#                 return Response(
-#                     {'error': 'Số tiền không hợp lệ'},
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
-#
-#             # Lấy và validate subscription
-#             try:
-#                 subscription = SubscriptionPackage.objects.get(
-#                     id=subscription_id,
-#                     member=request.user
-#                 )
-#             except SubscriptionPackage.DoesNotExist:
-#                 return Response(
-#                     {'error': 'Gói tập không tồn tại hoặc không thuộc về bạn'},
-#                     status=status.HTTP_404_NOT_FOUND
-#                 )
-#
-#             # Kiểm tra xem đã có payment pending cho subscription này chưa
-#             existing_pending = Payment.objects.filter(
-#                 subscription=subscription,
-#                 payment_method='vnpay',
-#                 status='pending'
-#             ).first()
-#
-#             if existing_pending:
-#                 # Hủy payment cũ nếu đã quá 15 phút
-#                 if existing_pending.created_at < timezone.now() - timedelta(minutes=15):
-#                     existing_pending.status = 'expired'
-#                     existing_pending.save()
-#                 else:
-#                     return Response(
-#                         {
-#                             'error': 'Đã có giao dịch đang chờ xử lý cho gói tập này',
-#                             'payment_id': existing_pending.id
-#                         },
-#                         status=status.HTTP_400_BAD_REQUEST
-#                     )
-#
-#             # Validate và làm sạch order_info
-#             if not order_info or len(order_info.strip()) < 5:
-#                 order_info = f"Thanh toan goi tap {subscription.package.name}"
-#             import re
-#             order_info = re.sub(r'[^\w\s-]', '', order_info.strip())
-#             order_info = order_info[:200] if len(order_info) > 200 else order_info
-#             if not order_info:
-#                 order_info = f"Thanh toan goi tap"
-#
-#             # Validate bank_code
-#             if bank_code:
-#                 valid_bank_codes = [
-#                     'VCB', 'TCB', 'BIDV', 'AGRI', 'MB', 'ACB', 'CTG', 'STB',
-#                     'NCB', 'SCB', 'EIB', 'MSB', 'NAB', 'VNMART', 'HDB', 'SHB',
-#                     'ABB', 'OCB', 'BAB', 'VPB', 'VIB', 'DAB', 'TPB', 'OJB',
-#                     'SEAB', 'UOB', 'PBVN', 'GPB', 'ANZ', 'HSBC', 'DB',
-#                     'SHINHAN', 'MIRAE', 'CIMB', 'KEB', 'CBB', 'KLB', 'IVB'
-#                 ]
-#                 if bank_code not in valid_bank_codes:
-#                     logger.warning(f"Invalid bank code: {bank_code}")
-#                     bank_code = None
-#
-#             # Tạo unique order_id
-#             unique_suffix = str(int(datetime.now().timestamp() * 1000))
-#             temp_order_id = f"{subscription.id}_{unique_suffix}"
-#
-#             # Tạo payment record và cập nhật trạng thái ngay lập tức
-#             with transaction.atomic():
-#                 payment = Payment.objects.create(
-#                     subscription=subscription,
-#                     amount=amount_decimal,
-#                     payment_method='vnpay',
-#                     status='completed',  # Đặt ngay thành completed
-#                     transaction_id=temp_order_id,
-#                     notes=f"VNPay payment: {order_info}",
-#                     confirmed_date=timezone.now()  # Đặt ngày xác nhận
-#                 )
-#
-#                 # Kích hoạt subscription
-#                 subscription.status = 'active'
-#                 subscription.save()
-#
-#                 # Cập nhật member profile
-#                 try:
-#                     member_profile = subscription.member.member_profile
-#                     if (not member_profile.membership_end_date or
-#                             subscription.end_date > member_profile.membership_end_date):
-#                         member_profile.membership_end_date = subscription.end_date
-#                     member_profile.is_active = True
-#                     member_profile.save()
-#                 except MemberProfile.DoesNotExist:
-#                     MemberProfile.objects.create(
-#                         user=subscription.member,
-#                         membership_end_date=subscription.end_date,
-#                         is_active=True
-#                     )
-#
-#                 # Tạo thông báo
-#                 Notification.objects.create(
-#                     user=subscription.member,
-#                     title="Thanh toán thành công (Test Mode)",
-#                     message=f"Thanh toán cho gói tập {subscription.package.name} đã hoàn tất (test mode)",
-#                     notification_type="payment_success"
-#                 )
-#
-#                 # Khởi tạo VNPay utils (vẫn tạo URL để giữ flow)
-#                 vnpay = VNPayUtils()
-#                 ip_addr = vnpay.get_client_ip(request)
-#
-#                 logger.info(f"Creating VNPay payment:")
-#                 logger.info(f"- Payment ID: {payment.id}")
-#                 logger.info(f"- Order ID (transaction_id): {payment.transaction_id}")
-#                 logger.info(f"- Amount: {amount_decimal}")
-#                 logger.info(f"- Order Info: '{order_info}'")
-#                 logger.info(f"- Bank Code: {bank_code}")
-#                 logger.info(f"- IP Address: {ip_addr}")
-#
-#                 # Tạo URL thanh toán (giữ nguyên để không phá vỡ flow)
-#                 try:
-#                     payment_url = vnpay.create_payment_url(
-#                         order_id=payment.transaction_id,
-#                         amount=float(amount_decimal),
-#                         order_desc=order_info,
-#                         ip_addr=ip_addr,
-#                         bank_code=bank_code
-#                     )
-#                     logger.info(f"VNPay payment URL created: {payment_url}")
-#                 except Exception as vnpay_error:
-#                     logger.error(f"VNPay URL creation failed: {str(vnpay_error)}")
-#                     payment_url = None  # Vẫn trả về response dù URL lỗi
-#
-#                 return Response({
-#                     'payment_id': payment.id,
-#                     'order_id': payment.transaction_id,
-#                     'payment_url': payment_url,
-#                     'amount': float(amount_decimal),
-#                     'order_info': order_info,
-#                     'bank_code': bank_code,
-#                     'message': 'Thanh toán đã được kích hoạt (test mode)'
-#                 }, status=status.HTTP_201_CREATED)
-#
-#         except Exception as e:
-#             logger.error(f"Unexpected error in VNPay payment creation: {str(e)}")
-#             return Response(
-#                 {
-#                     'error': 'Có lỗi xảy ra khi tạo thanh toán',
-#                     'details': 'Vui lòng thử lại sau'
-#                 },
-#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-#             )
-from django.db import models
+
 
 class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
     queryset = Notification.objects.all()
@@ -3496,8 +2850,16 @@ class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def my(self, request):
-        """Chỉ trả về thông báo của user hiện tại"""
-        notifications = self.get_queryset().order_by('-created_at')
+        """Trả về thông báo của người dùng hiện tại với phân trang"""
+        notifications = self.get_queryset().filter(user=request.user).order_by('-created_at')
+
+        # Áp dụng phân trang nếu được cấu hình
+        page = self.paginate_queryset(notifications)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        # Nếu không phân trang
         serializer = self.get_serializer(notifications, many=True)
         return Response(serializer.data)
 
@@ -3525,26 +2887,7 @@ class NotificationViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
         updated = self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({'status': f'marked {updated} notifications as read'})
 
-    @action(detail=False, methods=['get'])
-    def stats(self, request):
-        """Thống kê thông báo"""
-        queryset = self.get_queryset()
-        stats = {
-            'total': queryset.count(),
-            'unread': queryset.filter(is_read=False).count(),
-            'today': queryset.filter(created_at__date=timezone.now().date()).count(),
-            'this_week': queryset.filter(
-                created_at__gte=timezone.now() - timedelta(days=7)
-            ).count()
-        }
-        return Response(stats)
-
-
 class GymListView(generics.ListAPIView, viewsets.ViewSet):
-    """
-    API endpoint để lấy danh sách phòng gym
-    GET /api/gyms/
-    """
     queryset = Gym.objects.all()
     serializer_class = serializers.GymSerializer
     permission_classes = [permissions.IsAuthenticated]

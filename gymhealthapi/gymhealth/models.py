@@ -21,7 +21,7 @@ class UserManager(BaseUserManager):
         user.set_password(password)
         user.save(using=self._db)
         return user
-
+    #Ghi đè createsuperuser
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
@@ -49,7 +49,9 @@ class User(AbstractUser):
     date_of_birth = models.DateField(null=True, blank=True)
     address = models.CharField(max_length=200, null=True, blank=True)
     gender = models.CharField(max_length=10, null=True, blank=True)
-    avatar = CloudinaryField()
+    avatar = CloudinaryField(
+        default='image/upload/v1749786536/jhhd6f0e2xe7wiynoplk.jpg'
+    )
     objects = UserManager()  # <== thêm dòng này
 
     @property
@@ -92,6 +94,13 @@ class MemberProfile(models.Model):
             return False
         return self.is_active and self.membership_end_date >= date.today()
 
+    @property
+    def days_until_expiry(self):
+        """Tính số ngày còn lại cho đến khi hội viên hết hạn"""
+        from django.utils import timezone
+        if self.membership_end_date:
+            return (self.membership_end_date - timezone.now().date()).days
+        return None
 
 class TrainerProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='trainer_profile')
@@ -166,7 +175,7 @@ class Packages(BaseModel):
 
     @property
     def price_per_month(self):
-        """Tính giá trung bình mỗi tháng"""
+        # Tính giá trung bình mỗi tháng
         if self.package_type and self.package_type.duration_months > 0:
             return self.price / self.package_type.duration_months
         return self.price
@@ -364,7 +373,7 @@ class WorkoutSession(models.Model):
                 self.subscription.remaining_pt_sessions -= 1
                 self.subscription.save()
         super().save(*args, **kwargs)
-
+# kiểm tra lịch tập cùng ngày, thời gian chồng lấn, của cùng thành viên
     def clean(self):
         conflicting_sessions = WorkoutSession.objects.filter(
             models.Q(member=self.member) | models.Q(trainer=self.trainer),
@@ -460,18 +469,6 @@ class HealthInfo(models.Model):
         return today.year - self.user.date_of_birth.year - (
                 (today.month, today.day) < (self.user.date_of_birth.month, self.user.date_of_birth.day))
 
-    @property
-    def bmr(self):
-        """Tính chỉ số trao đổi chất cơ bản (BMR) theo công thức Harris-Benedict"""
-        if not self.user.gender or not self.age:
-            return None
-
-        gender = self.user.gender.lower()
-        if gender == 'male' or gender == 'nam':
-            return round(88.362 + (13.397 * self.weight) + (4.799 * self.height) - (5.677 * self.age), 2)
-        elif gender == 'female' or gender == 'nữ':
-            return round(447.593 + (9.247 * self.weight) + (3.098 * self.height) - (4.330 * self.age), 2)
-        return None
 
 
 # Mô hình theo dõi các bài tập và thành tích

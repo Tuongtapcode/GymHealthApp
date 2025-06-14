@@ -272,26 +272,16 @@ const Packages = ({ navigation }) => {
     }
   };
 
-  const fetchPackages = async (params = {}) => {
+  const fetchPackages = async (customParams = {}) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Thêm các filter vào params nếu có
-      const requestParams = { ...params };
-
-      // Thêm param active=true để chỉ lấy gói đang hoạt động
-      requestParams.active = true;
-
-      // Thêm package_type vào params nếu có lọc theo loại
-      if (selectedType !== null) {
-        requestParams.package_type = selectedType;
-      }
-
-      // Thêm tìm kiếm theo tên nếu có
-      if (searchQuery.trim() !== "") {
-        requestParams.search = searchQuery.trim();
-      }
+      // Chỉ dùng customParams, bỏ qua state hiện tại
+      const requestParams = {
+        active: true, // Luôn lấy gói đang hoạt động
+        ...customParams, // customParams sẽ override mọi thứ
+      };
 
       console.log(
         "Requesting packages URL:",
@@ -386,7 +376,7 @@ const Packages = ({ navigation }) => {
   const filterByType = (type) => {
     setSelectedType(type);
 
-    // Gọi API với bộ lọc mới
+    // Gọi API với bộ lọc mới, dùng trực tiếp type truyền vào
     const params = {};
 
     if (type !== null) {
@@ -649,7 +639,7 @@ const Packages = ({ navigation }) => {
             "Dữ liệu không hợp lệ. Vui lòng kiểm tra lại thông tin thanh toán.";
         } else if (error.response.status === 401) {
           errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
-          navigation.navigate("Login");
+          navigation.navigate("login");
           return;
         } else if (error.response.status === 403) {
           errorMessage = "Bạn không có quyền thực hiện hành động này.";
@@ -668,19 +658,6 @@ const Packages = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  }; // Hàm xử lý khi user chọn phương thức thanh toán
-  const handlePaymentMethodSelected = (paymentInfo) => {
-    setShowPaymentMethodModal(false);
-
-    if (selectedPackage) {
-      processRegistration(
-        selectedPackage.id,
-        selectedPackage.name,
-        selectedPackage.price,
-        paymentInfo.method,
-        paymentInfo.bankCode
-      );
-    }
   };
 
   // Hàm chính để handle đăng ký - mở modal chọn phương thức thanh toán
@@ -689,7 +666,19 @@ const Packages = ({ navigation }) => {
     console.log("Package details:", { packageId, package_name, package_price });
 
     if (!isLoggedIn) {
-      navigation.navigate("Login", { returnTo: "Packages", packageId });
+      Alert.alert(
+        "Thông báo",
+        "Bạn cần đăng nhập để đăng kí gói tập.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              navigation.navigate("login", { returnTo: "Packages", packageId });
+            },
+          },
+        ],
+        { cancelable: false }
+      );
       return;
     }
 

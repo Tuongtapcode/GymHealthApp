@@ -16,13 +16,11 @@ router.register(r'trainer-rating', views.TrainerRatingViewSet, basename='trainer
 router.register(r'gym-rating', views.GymRatingViewSet, basename='gym-rating')
 router.register(r'feedback-response', views.FeedbackResponseViewSet, basename='feedback-response')
 router.register(r'payments', views.PaymentViewSet, basename='payment')
-router.register(r'payment-receipts', views.PaymentReceiptViewSet, basename='payment-receipt')
 router.register(r'notifications', views.NotificationViewSet)
 router.register(r'gyms', views.GymListView, basename='gym')
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('register/', views.UserRegisterView.as_view(), name='user-register'),
 
     path('profile/', views.UserProfileView.as_view(), name='profile'),
     path('trainers/', views.TrainerListView.as_view(), name='trainer-list'),

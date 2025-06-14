@@ -9,28 +9,6 @@ from .utils.notification_service import NotificationService
 
 User = get_user_model()
 
-
-@receiver(post_save, sender=WorkoutSession)
-def schedule_session_reminder(sender, instance, created, **kwargs):
-    """Tự động lên lịch gửi thông báo khi tạo buổi tập mới"""
-    if created and instance.status == 'confirmed':
-        # Lên lịch gửi thông báo trước 2 giờ
-        session_datetime = timezone.make_aware(
-            timezone.datetime.combine(instance.session_date, instance.start_time)
-        )
-        reminder_time = session_datetime - timedelta(hours=2)
-
-        # Chỉ lên lịch nếu thời gian nhắc nhở trong tương lai
-        if reminder_time > timezone.now():
-            NotificationService.create_notification(
-                user=instance.member,
-                title="Nhắc nhở buổi tập",
-                message="Bạn có buổi tập sắp diễn ra",
-                notification_type='session_reminder',
-                related_object_id=instance.id,
-                scheduled_time=reminder_time
-            )
-
 @receiver(post_save, sender=Promotion)
 def handle_promotion_save(sender, instance, created, **kwargs):
     """

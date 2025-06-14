@@ -398,13 +398,6 @@ class MyAdminSite(admin.AdminSite):
             total=Sum('amount')
         )['total'] or 0
 
-        # Doanh thu theo phương thức thanh toán
-        payment_method_stats = Payment.objects.filter(
-            status='completed'
-        ).values('payment_method').annotate(
-            count=Count('id'),
-            total=Sum('amount')
-        ).order_by('-total')
 
         stats = {
             'package_stats': package_stats,
@@ -415,7 +408,6 @@ class MyAdminSite(admin.AdminSite):
             'time_slot_usage': time_slot_usage,
             'weekday_usage': weekday_data,
             'total_revenue': total_revenue,
-            'payment_method_stats': payment_method_stats,
         }
 
         return TemplateResponse(request, 'admin/stats.html', {
@@ -423,47 +415,6 @@ class MyAdminSite(admin.AdminSite):
             'stats': stats
         })
 
-    def member_stats(self, request):
-        # Biểu đồ tăng trưởng hội viên theo thời gian
-        member_growth = User.objects.filter(role='MEMBER').extra(
-            select={'month': "DATE_FORMAT(date_joined, '%%Y-%%m')"}
-        ).values('month').annotate(count=Count('id')).order_by('month')
-
-        # Phân loại hội viên theo mục tiêu tập luyện
-        goal_distribution = HealthInfo.objects.values('training_goal').annotate(
-            count=Count('id')
-        ).order_by('-count')
-
-        stats = {
-            'member_growth': list(member_growth),
-            'goal_distribution': list(goal_distribution),
-        }
-
-        return TemplateResponse(request, 'admin/member_stats.html', {
-            'title': 'Thống kê Hội viên',
-            'stats': stats
-        })
-
-    def revenue_stats(self, request):
-        # Doanh thu theo thời gian
-        monthly_revenue = Payment.objects.filter(status='completed').extra(
-            select={'month': "DATE_FORMAT(payment_date, '%%Y-%%m')"}
-        ).values('month').annotate(revenue=Sum('amount')).order_by('month')
-
-        # Doanh thu theo phương thức thanh toán
-        payment_method_revenue = Payment.objects.filter(status='completed').values(
-            'payment_method'
-        ).annotate(revenue=Sum('amount')).order_by('-revenue')
-
-        stats = {
-            'monthly_revenue': list(monthly_revenue),
-            'payment_method_revenue': list(payment_method_revenue),
-        }
-
-        return TemplateResponse(request, 'admin/revenue_stats.html', {
-            'title': 'Thống kê Doanh thu',
-            'stats': stats
-        })
 
 
 admin_site = MyAdminSite(name='GymHealth')

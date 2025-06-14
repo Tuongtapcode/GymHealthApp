@@ -180,29 +180,6 @@
             <canvas id="packageChart"></canvas>
         </div>
     </div>
-
-    <!-- Thống kê phương thức thanh toán -->
-    <div class="stats-card">
-        <div class="stats-title">Doanh thu theo phương thức thanh toán</div>
-        <div class="chart-row">
-            <div class="chart-col">
-                <div class="chart-container">
-                    <canvas id="paymentMethodChart"></canvas>
-                </div>
-            </div>
-            <div class="chart-col">
-                <div class="stats-subtitle">Chi tiết thanh toán</div>
-                <ul class="payment-method-list">
-                    {% for payment_method in stats.payment_method_stats %}
-                    <li class="payment-method-item">
-                        <span>{{ payment_method.payment_method }}</span>
-                        <span>{{ payment_method.total|floatformat:0 }} VNĐ ({{ payment_method.count }} giao dịch)</span>
-                    </li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-    </div>
 </div>
 
 <script>

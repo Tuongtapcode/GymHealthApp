@@ -2,7 +2,7 @@ import { current } from "@reduxjs/toolkit";
 import axios from "axios";
 
 // Địa chỉ cơ bản của server
-const BASE_URL = "http://192.168.2.16:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
+const BASE_URL = "http:192.168.1.7:8000/"; // Thay đổi 127.0.0.1 thành địa chỉ IP của máy tính
 export const endpoints = {
   login: "/o/token/",
   profile: "/profile/",
@@ -45,9 +45,18 @@ export const endpoints = {
   feedbackResponse: "/feedback-response/",
 };
 
-export const CLIENT_ID = "AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh";
+// export const CLIENT_ID = "AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh";
+// export const CLIENT_SECRET =
+//   "89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o";
+// // Tạo instance của axios cho các yêu cầu không cần xác thực
+// const axiosInstance = axios.create({
+//   baseURL: BASE_URL,
+// });
+
+
+export const CLIENT_ID = "lT20dH0jIzVwF1MCCB4XTAIpdjWHVdoECdCn9P7N";
 export const CLIENT_SECRET =
-  "89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o";
+  "IxTMTrirrXPG4IPwN2klrQ9TCN5D4XiWQ5gxh0yZFXObCBtsY97omgJEaMQ2mjD0j7uUWb50zbAW7PR8grOZl0UC2cDQQJP4nOWWnVhMJpI9n7ESq03HmWFXaoz28PEL";
 // Tạo instance của axios cho các yêu cầu không cần xác thực
 const axiosInstance = axios.create({
   baseURL: BASE_URL,

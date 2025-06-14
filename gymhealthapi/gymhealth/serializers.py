@@ -131,7 +131,7 @@ class MemberProfileSerializer(ModelSerializer):
         fields = ('id', 'username', 'email', 'avatar','membership_start_date', 'membership_end_date',
                   'is_active', 'emergency_contact_name', 'emergency_contact_phone',
                   'is_membership_valid')
-        read_only_fields = ['id', 'user', 'membership_start_date']
+        read_only_fields = ['id', 'user', 'membership_start_date', 'membership_end_date', 'is_membership_valid']
 
 class TrainerProfileSerializer(ModelSerializer):
     username = CharField(source='user.username', read_only=True)
@@ -330,6 +330,13 @@ class WorkoutSessionScheduleSerializer(ModelSerializer):
                   'session_type_display', 'member_name']
 
 
+
+class SubscriptionPackageSerializer(ModelSerializer):
+    class Meta:
+        model = SubscriptionPackage
+        fields = '__all__'
+
+
 class TrainerListSerializer(ModelSerializer):
     """Serializer để hiển thị danh sách PT với thông tin cơ bản và lịch làm việc"""
     trainer_profile = TrainerProfileSerializer(read_only=True)
@@ -348,11 +355,6 @@ class TrainerListSerializer(ModelSerializer):
             return obj.avatar.url
         return None
 
-
-class SubscriptionPackageSerializer(ModelSerializer):
-    class Meta:
-        model = SubscriptionPackage
-        fields = '__all__'
 
 
 class TrainerDetailSerializer(ModelSerializer):
@@ -391,15 +393,15 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
         }
 
     def validate_session_date(self, value):
-        """Validate session_date phải trong thời hạn thành viên"""
+        """Validate session_date với tất cả các điều kiện"""
         request = self.context.get('request')
         if not request or not request.user:
             return value
 
+        # Kiểm tra 1: Ngày đăng ký buổi tập phải <= ngày kết thúc thành viên
         try:
             member_profile = request.user.member_profile
 
-            # Kiểm tra ngày đăng ký buổi tập phải <= ngày kết thúc thành viên
             if member_profile.membership_end_date and value > member_profile.membership_end_date:
                 raise ValidationError(
                     f"Không thể đăng ký buổi tập sau ngày {member_profile.membership_end_date.strftime('%d/%m/%Y')}. "
@@ -410,19 +412,19 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
             # Trường hợp user chưa có member_profile
             raise ValidationError("Bạn chưa có hồ sơ thành viên.")
 
+        # Kiểm tra 2: Ngày tập phải là ngày trong tương lai
+        if value < date.today():
+            raise ValidationError("Ngày tập phải là ngày trong tương lai.")
+
+        # Kiểm tra 3: Không thể đặt lịch tập quá xa trong tương lai (tối đa 30 ngày)
+        max_days = 30
+        if value > date.today() + timedelta(days=max_days):
+            raise ValidationError(f"Không thể đặt lịch tập quá {max_days} ngày từ hiện tại.")
+
         return value
 
     def validate(self, data):
-        """Additional validation for the entire object"""
-        # Có thể thêm các validation khác ở đây nếu cần
-        return data
-
-    def validate(self, data):
         """Kiểm tra tính hợp lệ của dữ liệu đầu vào"""
-        # Kiểm tra ngày tập phải là ngày trong tương lai
-        if data['session_date'] < date.today():
-            raise ValidationError({"session_date": "Ngày tập phải là ngày trong tương lai."})
-
         # Kiểm tra thời gian kết thúc phải sau thời gian bắt đầu
         if data['end_time'] <= data['start_time']:
             raise ValidationError({"end_time": "Thời gian kết thúc phải sau thời gian bắt đầu."})
@@ -463,13 +465,6 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
 
         return data
 
-    def validate_session_date(self, value):
-        """Kiểm tra ngày tập không quá xa trong tương lai (tối đa 30 ngày)"""
-        max_days = 30
-        if value > date.today() + timedelta(days=max_days):
-            raise ValidationError(f"Không thể đặt lịch tập quá {max_days} ngày từ hiện tại.")
-        return value
-
     def validate_trainer(self, value):
         """Kiểm tra người được chọn có phải là PT không"""
         if value and not value.is_trainer:
@@ -500,13 +495,15 @@ class WorkoutSessionCreateSerializer(ModelSerializer):
 
             validated_data['subscription'] = active_subscription
 
-        # Đặt trạng thái mặc định là 'pending'
-        validated_data['status'] = 'pending'
+        session_type = validated_data.get('session_type')
+        if session_type == 'self_training':
+            validated_data['status'] = 'confirmed'
+        else:
+            validated_data['status'] = 'pending'
 
         # Tạo buổi tập mới
         workout_session = WorkoutSession.objects.create(**validated_data)
         return workout_session
-
 
 class WorkoutSessionListScheduleSerializer(ModelSerializer):
     member_name = SerializerMethodField()

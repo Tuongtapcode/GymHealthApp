@@ -213,7 +213,7 @@ const Payment = ({ route, navigation }) => {
       return;
     }
 
-    // VNPay Success Detection - Cải thiện
+    // VNPay Success Detection
     const vnpaySuccessPatterns = [
       /vnp_ResponseCode=00/i,
       /vnp_TransactionStatus=00/i,

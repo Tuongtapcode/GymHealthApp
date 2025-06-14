@@ -3,7 +3,7 @@ from django.utils.deprecation import MiddlewareMixin
 
 class VNPayCORSMiddleware(MiddlewareMixin):
     def process_request(self, request):
-        if request.path.startswith('/api/payments/vnpay/'):
+        if request.path.startswith('/payments/vnpay/'):
             # Log request để debug
             import logging
             logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class VNPayCORSMiddleware(MiddlewareMixin):
             logger.info(f"POST data: {dict(request.POST)}")
 
     def process_response(self, request, response):
-        if request.path.startswith('/api/payments/vnpay/'):
+        if request.path.startswith('/payments/vnpay/'):
             response["Access-Control-Allow-Origin"] = "*"
             response["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"

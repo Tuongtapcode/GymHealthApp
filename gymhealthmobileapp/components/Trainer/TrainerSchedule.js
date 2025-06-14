@@ -19,7 +19,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
-const   TrainerSchedule = ({ navigation }) => {
+const TrainerSchedule = ({ navigation }) => {
   const userFromRedux = useSelector((state) => state.user);
 
   const [sessions, setSessions] = useState([]);
@@ -581,7 +581,7 @@ const   TrainerSchedule = ({ navigation }) => {
         </View>
         <TouchableOpacity
           style={styles.statusButton}
-        //   onPress={() => showStatusChangeOptions(item)}
+          //   onPress={() => showStatusChangeOptions(item)}
         >
           <View
             style={[
@@ -636,7 +636,11 @@ const   TrainerSchedule = ({ navigation }) => {
         <TouchableOpacity
           style={styles.actionButton}
           onPress={() =>
-            navigation.navigate("Chat", { memberId: item.member_id, userId: item.trainer_id, chatName: item.member_name })
+            navigation.navigate("Chat", {
+              memberId: item.member_id,
+              userId: item.trainer_id,
+              chatName: item.member_name,
+            })
           }
         >
           <Icon name="chat" size={20} color="#2196F3" />
@@ -723,10 +727,13 @@ const   TrainerSchedule = ({ navigation }) => {
             <TouchableOpacity
               style={[styles.actionButton, styles.progressButton]}
               onPress={() =>
-                navigation.navigate("TrainingProgress", {
-                  sessionId: item.id,
-                  memberId: item.member_id,
-                  memberName: item.member_name,
+                navigation.navigate("schedule", {
+                  screen: "TrainingProgress",
+                  params: {
+                    sessionId: item.id,
+                    memberId: item.member_id,
+                    memberName: item.member_name,
+                  },
                 })
               }
             >
@@ -974,7 +981,7 @@ const   TrainerSchedule = ({ navigation }) => {
                       style={[
                         styles.filterOption,
                         selectedStatus === option.key &&
-                        styles.filterOptionSelected,
+                          styles.filterOptionSelected,
                       ]}
                       onPress={() => setSelectedStatus(option.key)}
                     >
@@ -988,7 +995,7 @@ const   TrainerSchedule = ({ navigation }) => {
                         style={[
                           styles.filterOptionText,
                           selectedStatus === option.key &&
-                          styles.filterOptionTextSelected,
+                            styles.filterOptionTextSelected,
                         ]}
                       >
                         {option.label}
@@ -1013,7 +1020,7 @@ const   TrainerSchedule = ({ navigation }) => {
                       style={[
                         styles.filterOption,
                         selectedDateRange === option.key &&
-                        styles.filterOptionSelected,
+                          styles.filterOptionSelected,
                       ]}
                       onPress={() => setSelectedDateRange(option.key)}
                     >
@@ -1021,7 +1028,7 @@ const   TrainerSchedule = ({ navigation }) => {
                         style={[
                           styles.filterOptionText,
                           selectedDateRange === option.key &&
-                          styles.filterOptionTextSelected,
+                            styles.filterOptionTextSelected,
                         ]}
                       >
                         {option.label}

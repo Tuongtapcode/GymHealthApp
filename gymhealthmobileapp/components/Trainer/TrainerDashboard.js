@@ -181,7 +181,7 @@ const TrainerDashboard = ({ navigation }) => {
         <View style={styles.requestActions}>
           <TouchableOpacity
             style={[styles.actionButton, styles.approveButton]}
-            onPress={() => handleApproveSession(item.id)}
+            // onPress={() => handleApproveSession(item.id)}
           >
             <Icon name="check" size={16} color="#fff" />
           </TouchableOpacity>

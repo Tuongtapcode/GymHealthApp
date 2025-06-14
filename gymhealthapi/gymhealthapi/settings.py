@@ -54,8 +54,8 @@ VNPAY_CONFIG = {
     'HASH_SECRET': 'V3025B1XYEAPJFBN9FSXWEXIC52YRTMM',  # ✔ Đúng theo email
     'URL': 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
     'API_URL': 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction',
-    'RETURN_URL': 'https://8983-171-231-61-11.ngrok-free.app/api/payments/vnpay/return/',
-    'IPN_URL': 'https://8983-171-231-61-11.ngrok-free.app/api/payments/vnpay/ipn/',
+    'RETURN_URL': 'https://ebbd-2402-800-63b8-a6a1-9082-a66b-4ac6-da4f.ngrok-free.app/api/payments/vnpay/return/',
+    'IPN_URL': 'https://ebbd-2402-800-63b8-a6a1-9082-a66b-4ac6-da4f.ngrok-free.app/api/payments/vnpay/ipn/',
     'VERSION': '2.1.0',
     'COMMAND': 'pay',
     'CURR_CODE': 'VND',
@@ -180,7 +180,7 @@ import pymysql
 ALLOWED_HOSTS=['*']
 CSRF_TRUSTED_ORIGINS = [
     'https://sandbox.vnpayment.vn',
-    'https://8983-171-231-61-11.ngrok-free.app/',  # URL ngrok hiện tại
+    'https://ebbd-2402-800-63b8-a6a1-9082-a66b-4ac6-da4f.ngrok-free.app/',  # URL ngrok hiện tại
     'https://sandbox.vnpayment.vn/vnpaygw-sit-testing/order',
 ]
 pymysql.install_as_MySQLdb()
@@ -208,7 +208,7 @@ WSGI_APPLICATION = 'gymhealthapi.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'gymhealthdb',
+        'NAME': 'gymdb',
         'USER': 'root',
         'PASSWORD': 'Admin@123',
         'HOST': ''  # mặc định localhost
@@ -262,4 +262,7 @@ OAUTH2_PROVIDER = {
 CLIENT_ID = 'AybXSAZ8adNhzo3rKcuzxhnts15OmhSsoXzWinQh'
 CLIENT_SECRET = '89c3eyIkMYEOboVb79WKxMsuixsRwptPUJwpBzc671UuMMom8ep05xruWHR8SeP63fvRBlPgLTu6H6yWhFveKNWCwkamMXWQN4iSEyfHhfYyPMyVjHvh7JI9nj7u355o'
 
+#
+# CLIENT_ID = '3KGMVRSmq9OgbqjLiBg8KDElfkXNp2hLa8ZgCvGb'
+# CLIENT_SECRET = 'sE1zQKrhRKO7vV5in0HmkcwmDUTlpryojmellWkkD0eWKTiPHfM4DS4WlLY7UTCnSiiyoIoU7LTPsLidnBfnOiqWrcRStsVXDgzBvBNkKAV4lTYYlgOuVx8zJfJPwmlk'
 

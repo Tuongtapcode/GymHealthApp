@@ -21,7 +21,7 @@ import { LineChart } from "react-native-chart-kit";
 import AllNotificationsModal from "./AllNotificationsModal";
 
 const Home = ({ navigation }) => {
-  const [activeTab, setActiveTab] = useState("home");
+
   const [userPackage, setUserPackage] = useState(null);
   // ...existing code...
   const [notifications, setNotifications] = useState([]);
@@ -89,17 +89,9 @@ const Home = ({ navigation }) => {
       setNotificationsLoading(true);
       setNotificationsError(null);
 
-      // Lấy access token từ AsyncStorage
       const accessToken = await AsyncStorage.getItem("accessToken");
-      console.log("Access Token for notifications:", accessToken);
+      if (!accessToken) throw new Error("Không tìm thấy token đăng nhập");
 
-      if (!accessToken) {
-        console.log("No access token found");
-        throw new Error("Không tìm thấy token đăng nhập");
-      }
-
-      // Gọi API lấy thông báo của user hiện tại
-      console.log("Requesting URL:", endpoints.notifications + "my/");
       const response = await axiosInstance.get(
         endpoints.notifications + "my/",
         {
@@ -109,20 +101,18 @@ const Home = ({ navigation }) => {
         }
       );
 
-      // console.log("Notifications API response:", response.data);
-
-      if (response.data && Array.isArray(response.data)) {
-        // Chuyển đổi dữ liệu để phù hợp với giao diện
-        const formattedNotifications = response.data.map((notification) => ({
-          id: notification.id.toString(),
-          message: notification.message,
-          time: formatTimeAgo(notification.created_at),
-          read: notification.is_read,
-          type: notification.notification_type,
-          title: notification.title,
-          // Lưu dữ liệu gốc để sử dụng nếu cần
-          originalData: notification,
-        }));
+      if (response.data && Array.isArray(response.data.results)) {
+        const formattedNotifications = response.data.results.map(
+          (notification) => ({
+            id: notification.id.toString(),
+            message: notification.message,
+            time: formatTimeAgo(notification.created_at),
+            read: notification.is_read,
+            type: notification.notification_type,
+            title: notification.title,
+            originalData: notification,
+          })
+        );
 
         setNotifications(formattedNotifications);
       } else {
@@ -133,12 +123,11 @@ const Home = ({ navigation }) => {
     } catch (error) {
       console.error("Error fetching notifications:", error);
       setNotificationsError("Không thể tải thông báo");
-      setNotificationsLoading(false);
-
-      // Fallback về dữ liệu mock nếu lỗi
       setNotifications([]);
+      setNotificationsLoading(false);
     }
   };
+
   // Hàm định dạng thời gian "time ago"
   const formatTimeAgo = (dateString) => {
     const now = new Date();
@@ -518,18 +507,6 @@ const Home = ({ navigation }) => {
       setLoading(false);
     }
   };
-
-  // Đảm bảo bạn đã khởi tạo các state này trong component của mình:
-  // const [trainingProgress, setTrainingProgress] = useState([]);
-  // const [latestProgressRecord, setLatestProgressRecord] = useState(null); // Tùy chọn
-  // const [loading, setLoading] = useState(false);
-  // const [error, setError] = useState(null);
-
-  // Sử dụng trong useEffect
-  // useEffect(() => {
-  //   fetchTrainingProgress();
-  // }, []);
-
   // Lấy thông tin người dùng khi component được mount
   useEffect(() => {
     const fetchUserData = async () => {
@@ -595,7 +572,7 @@ const Home = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("packages")} // Chuyển đến trang Packages
+            onPress={() => navigation.navigate("packages")}
           >
             <Text style={styles.buttonPrimaryText}>Đăng ký ngay</Text>
           </TouchableOpacity>
@@ -661,7 +638,7 @@ const Home = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("BookSession")}
+            onPress={() => navigation.navigate("Schedule")}
           >
             <Text style={styles.buttonPrimaryText}>Đặt lịch ngay</Text>
           </TouchableOpacity>
@@ -817,7 +794,6 @@ const Home = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.buttonPrimary}
-            onPress={() => navigation.navigate("AddProgress")} // Giả sử có màn hình thêm tiến độ
           >
             <Text style={styles.buttonPrimaryText}>Thêm dữ liệu</Text>
           </TouchableOpacity>
@@ -1186,7 +1162,6 @@ const Home = ({ navigation }) => {
                   styles.notificationItem,
                   !item.read && styles.unreadNotification,
                 ]}
-                onPress={() => markNotificationAsRead(item.id)}
               >
                 <View style={styles.notificationContent}>
                   <Text style={styles.notificationMessage}>
