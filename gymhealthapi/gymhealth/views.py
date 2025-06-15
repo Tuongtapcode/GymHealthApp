@@ -19,16 +19,69 @@ from django.db.models import Min, Max, Q, Count
 from gymhealth.utils.vnpay_payment import VNPayUtils
 
 
-class UserViewSet(viewsets.ViewSet, viewsets.GenericViewSet):
+
+class PackageTypeViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = PackageType.objects.filter(active=True)
+    serializer_class = PackageTypeSerializer
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'duration_months']
+    pagination_class = paginators.ItemPaginator
+
+    def get_permissions(self):
+        return [permissions.AllowAny()]
+
+class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Benefit.objects.filter(active=True)
+    serializer_class = BenefitSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ['name', 'description']
+    ordering_fields = ['name']
+    pagination_class = paginators.ItemPaginator
+
+
+class PackageViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Packages.objects.filter(active=True)
+    permission_classes =[permissions.AllowAny]
+    serializer_class = PackageSerializer
+    search_fields = ['name', 'description']
+    ordering_fields = ['price', 'package_type__duration_months', 'pt_sessions']
+    filterset_fields = ['package_type', 'pt_sessions', 'price']
+    filter_backends = [DjangoFilterBackend]
+    pagination_class = paginators.ItemPaginator
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PackageDetailSerializer
+        return PackageSerializer
+
+    def list(self, request, *args, **kwargs):
+        # Apply the default filtering, ordering, etc. by calling super().filter_queryset()
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path="with_pt")
+    def with_pt(self, request):
+        # Danh sách gói có buổi PT
+        queryset = self.filter_queryset(self.get_queryset())
+        packages = queryset.filter(pt_sessions__gt=0) #pt_sessions > 0
+        serializer = self.get_serializer(packages, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def benefits(self, request, pk=None):
+        # Danh sách quyền lợi của 1 gói
+        package = self.get_object()
+        benefits = package.benefits.filter(active=True)
+        serializer = BenefitSerializer(benefits, many=True)
+        return Response(serializer.data)
+
+
+class UserViewSet(viewsets.GenericViewSet):
     queryset = User.objects.filter(is_active=True)
     serializer_class = serializers.UserSerializer
     # Định nghĩa gửi form
     parser_classes = [parsers.MultiPartParser]
-
-    # Thêm các lớp filter và sắp xếp
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['first_name', 'last_name', 'email', 'is_staff']  # Các trường để filter
-    search_fields = ['first_name', 'last_name', 'email', 'username']  # Các trường để tìm kiếm
     ordering_fields = ['id', 'first_name', 'last_name', 'date_joined']  # Các trường để sắp xếp
     ordering = ['id']  # Sắp xếp mặc định
     pagination_class = paginators.ItemPaginator
@@ -167,65 +220,6 @@ class UserProfileView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
-
-
-class PackageTypeViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = PackageType.objects.filter(active=True)
-    serializer_class = PackageTypeSerializer
-    search_fields = ['name', 'description']
-    ordering_fields = ['name', 'duration_months']
-    pagination_class = paginators.ItemPaginator
-
-    def get_permissions(self):
-        return [permissions.AllowAny()]
-
-class BenefitViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Benefit.objects.filter(active=True)
-    serializer_class = BenefitSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    search_fields = ['name', 'description']
-    ordering_fields = ['name']
-    pagination_class = paginators.ItemPaginator
-
-
-class PackageViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Packages.objects.filter(active=True)
-    permission_classes =[permissions.AllowAny]
-    serializer_class = PackageSerializer
-    search_fields = ['name', 'description']
-    ordering_fields = ['price', 'package_type__duration_months', 'pt_sessions']
-    filterset_fields = ['package_type', 'pt_sessions', 'price']
-    filter_backends = [DjangoFilterBackend]
-    pagination_class = paginators.ItemPaginator
-
-    def get_serializer_class(self):
-        if self.action == 'retrieve':
-            return PackageDetailSerializer
-        return PackageSerializer
-
-    def list(self, request, *args, **kwargs):
-        # Apply the default filtering, ordering, etc. by calling super().filter_queryset()
-        queryset = self.filter_queryset(self.get_queryset())
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'], url_path="with_pt")
-    def with_pt(self, request):
-        # Danh sách gói có buổi PT
-        queryset = self.filter_queryset(self.get_queryset())
-        packages = queryset.filter(pt_sessions__gt=0) #pt_sessions > 0
-        serializer = self.get_serializer(packages, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['get'])
-    def benefits(self, request, pk=None):
-        # Danh sách quyền lợi của 1 gói
-        package = self.get_object()
-        benefits = package.benefits.filter(active=True)
-        serializer = BenefitSerializer(benefits, many=True)
-        return Response(serializer.data)
-
-
 class TrainerListView(generics.ListAPIView):
     #API để lấy danh sách PT với thông tin cơ bản và lịch làm việc
     serializer_class = TrainerListSerializer
