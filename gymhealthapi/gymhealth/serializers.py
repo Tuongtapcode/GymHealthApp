@@ -9,6 +9,30 @@ from datetime import date, timedelta, datetime
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
     WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
     FeedbackResponse
+class PackageTypeSerializer(ModelSerializer):
+    class Meta:
+        model = PackageType
+        fields = '__all__'
+
+
+class BenefitSerializer(ModelSerializer):
+    class Meta:
+        model = Benefit
+        fields = '__all__'
+
+
+class PackageSerializer(ModelSerializer):
+    price_per_month = SerializerMethodField()
+
+    class Meta:
+        model = Packages
+        fields = '__all__'
+
+    def get_price_per_month(self, obj):
+        return obj.price_per_month
+
+
+
 
 
 class UserSerializer(ModelSerializer):
@@ -152,30 +176,6 @@ class TrainerProfileSerializer(ModelSerializer):
         if value < 0:
             raise ValidationError("Số năm kinh nghiệm không thể là số âm")
         return value
-
-
-class PackageTypeSerializer(ModelSerializer):
-    class Meta:
-        model = PackageType
-        fields = '__all__'
-
-
-class BenefitSerializer(ModelSerializer):
-    class Meta:
-        model = Benefit
-        fields = '__all__'
-
-
-class PackageSerializer(ModelSerializer):
-    price_per_month = SerializerMethodField()
-
-    class Meta:
-        model = Packages
-        fields = '__all__'
-
-    def get_price_per_month(self, obj):
-        return obj.price_per_month
-
 
 class PackageDetailSerializer(PackageSerializer):
     package_type = PackageTypeSerializer(read_only=True)
