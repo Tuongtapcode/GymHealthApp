@@ -3,12 +3,13 @@ from django.db.models import FloatField
 from rest_framework.fields import ChoiceField, FloatField, ImageField, BooleanField, SerializerMethodField, DateField, \
     IntegerField, TimeField, ReadOnlyField, DecimalField
 from rest_framework.relations import StringRelatedField
-
 from rest_framework.serializers import ModelSerializer, CharField, ValidationError, Serializer
 from datetime import date, timedelta, datetime
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
     WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
     FeedbackResponse
+
+
 
 class PackageTypeSerializer(ModelSerializer):
     class Meta:
@@ -31,8 +32,6 @@ class PackageSerializer(ModelSerializer):
 
     def get_price_per_month(self, obj):
         return obj.price_per_month
-
-
 
 
 
