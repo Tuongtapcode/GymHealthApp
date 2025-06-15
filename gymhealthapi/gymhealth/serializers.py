@@ -9,6 +9,7 @@ from datetime import date, timedelta, datetime
 from gymhealth.models import User, HealthInfo, MemberProfile, TrainerProfile, Packages, PackageType, Benefit, \
     WorkoutSession, SubscriptionPackage, Promotion, Notification, TrainingProgress, TrainerRating, GymRating, Gym, \
     FeedbackResponse
+
 class PackageTypeSerializer(ModelSerializer):
     class Meta:
         model = PackageType
